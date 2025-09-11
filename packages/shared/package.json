@@ -1,0 +1,29 @@
+{
+  "name": "@cira/shared",
+  "version": "1.0.0",
+  "description": "Shared utilities and types for invoice processing system",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint --config ../../eslint.config.js src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "zod": "^4.1.5",
+    "decimal.js": "^10.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1"
+  },
+  "keywords": [
+    "shared",
+    "types",
+    "utilities",
+    "constants"
+  ]
+}

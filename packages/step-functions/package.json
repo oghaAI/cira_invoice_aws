@@ -1,0 +1,31 @@
+{
+  "name": "@cira/step-functions",
+  "version": "1.0.0",
+  "description": "Step Functions definitions and tasks for invoice processing workflow",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint --config ../../eslint.config.js src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@cira/shared": "*",
+    "@cira/database": "*",
+    "aws-sdk": "^2.1692.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/aws-lambda": "^8.10.145"
+  },
+  "keywords": [
+    "step-functions",
+    "workflow",
+    "aws",
+    "lambda"
+  ]
+}

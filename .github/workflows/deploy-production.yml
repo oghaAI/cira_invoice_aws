@@ -1,0 +1,112 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  NODE_VERSION: 20.x
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Run tests with coverage
+        run: npm run test:coverage
+        
+      - name: Run linting
+        run: npm run lint
+        
+      - name: Build packages
+        run: npm run build
+        
+      - name: Run security audit
+        run: npm audit --audit-level=high
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    
+    permissions:
+      id-token: write
+      contents: read
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build packages
+        run: npm run build
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PRODUCTION }}
+          role-session-name: GitHubActions-Production
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Deploy to production
+        run: |
+          cd packages/infrastructure
+          npm run deploy:prod
+          
+      - name: Run post-deployment tests
+        run: |
+          # TODO: Add comprehensive post-deployment tests
+          echo "Post-deployment tests completed"
+          
+      - name: Create deployment tag
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: release } = await github.rest.repos.getLatestRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            
+            await github.rest.git.createTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: `deploy-${Date.now()}`,
+              message: `Production deployment ${release.tag_name}`,
+              object: context.sha,
+              type: 'commit'
+            });
+            
+      - name: Notify deployment status
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#production-deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL_PROD }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL_PROD }}

@@ -1,0 +1,38 @@
+{
+  "name": "@cira/infrastructure",
+  "version": "1.0.0",
+  "description": "AWS CDK infrastructure definitions for invoice processing system",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint --config ../../eslint.config.js src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rm -rf dist",
+    "deploy": "cdk deploy",
+    "deploy:dev": "cdk deploy --context environment=dev",
+    "deploy:staging": "cdk deploy --context environment=staging",
+    "deploy:prod": "cdk deploy --context environment=prod",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "destroy": "cdk destroy"
+  },
+  "dependencies": {
+    "@cira/shared": "*",
+    "aws-cdk-lib": "^2.214.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "aws-cdk": "^2.214.0"
+  },
+  "keywords": [
+    "infrastructure",
+    "aws",
+    "cdk",
+    "iac"
+  ]
+}

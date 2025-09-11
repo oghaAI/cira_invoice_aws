@@ -1,0 +1,33 @@
+{
+  "name": "@cira/api",
+  "version": "1.0.0",
+  "description": "API Lambda functions for invoice processing",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint --config ../../eslint.config.js src/**/*.ts",
+    "format": "prettier --write src/**/*.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@cira/shared": "*",
+    "@cira/database": "*",
+    "hono": "^4.9.6",
+    "zod": "^4.1.5",
+    "bcrypt": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/node": "^24.3.1"
+  },
+  "keywords": [
+    "api",
+    "lambda",
+    "hono",
+    "serverless"
+  ]
+}
