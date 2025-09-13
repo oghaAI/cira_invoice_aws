@@ -5,11 +5,13 @@
 export const DATABASE_VERSION = '1.1.0';
 
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+export type ProcessingPhase = 'analyzing_invoice' | 'extracting_data' | 'verifying_data';
 
 export interface Job {
   id: string;
   clientId: string | null;
   status: JobStatus;
+  processingPhase: ProcessingPhase | null;
   pdfUrl: string;
   createdAt: Date;
   updatedAt: Date;
@@ -38,7 +40,33 @@ export interface DatabaseClientConfig {
 
 import { Pool } from 'pg';
 
-export class DatabaseClient {
+export interface IDatabaseClient {
+  // lifecycle
+  end(): Promise<void>;
+
+  // health
+  healthCheck(): Promise<boolean>;
+
+  // jobs
+  createJob(params: { clientId: string | null; pdfUrl: string }): Promise<Job>;
+  getJobById(id: string): Promise<Job | null>;
+  listJobsByClient(clientId: string, options?: { limit?: number; status?: JobStatus }): Promise<Job[]>;
+  updateJobStatus(id: string, status: JobStatus, errorMessage?: string | null, completedAt?: Date | null): Promise<Job | null>;
+  setJobStatusProcessing(id: string): Promise<Job | null>;
+  setJobProcessingPhase(id: string, phase: ProcessingPhase): Promise<Job | null>;
+  clearJobProcessingPhase(id: string): Promise<Job | null>;
+
+  // results
+  upsertJobResult(params: {
+    jobId: string;
+    extractedData: unknown;
+    confidenceScore: number | null;
+    tokensUsed: number | null;
+  }): Promise<JobResult>;
+  getJobResult(jobId: string): Promise<JobResult | null>;
+}
+
+export class DatabaseClient implements IDatabaseClient {
   private readonly pool: Pool;
 
   constructor(config?: DatabaseClientConfig) {
@@ -80,7 +108,7 @@ export class DatabaseClient {
     const query = `
       INSERT INTO jobs (client_id, pdf_url)
       VALUES ($1, $2)
-      RETURNING id, client_id, status, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
     `;
 
     const result = await this.pool.query(query, [params.clientId, params.pdfUrl]);
@@ -90,7 +118,7 @@ export class DatabaseClient {
 
   async getJobById(id: string): Promise<Job | null> {
     const query = `
-      SELECT id, client_id, status, pdf_url, created_at, updated_at, completed_at, error_message
+      SELECT id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
       FROM jobs
       WHERE id = $1
     `;
@@ -109,7 +137,7 @@ export class DatabaseClient {
     const limit = options?.limit ?? 50;
 
     const query = `
-      SELECT id, client_id, status, pdf_url, created_at, updated_at, completed_at, error_message
+      SELECT id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
       FROM jobs
       WHERE ${conditions.join(' AND ')}
       ORDER BY created_at DESC
@@ -129,9 +157,48 @@ export class DatabaseClient {
       UPDATE jobs
       SET status = $2, error_message = $3, completed_at = $4
       WHERE id = $1
-      RETURNING id, client_id, status, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
     `;
     const result = await this.pool.query(query, [id, status, errorMessage ?? null, completedAt ?? null]);
+    if (result.rowCount === 0) return null;
+    return this.mapJob(result.rows[0]);
+  }
+
+  // Mark a job as processing
+  async setJobStatusProcessing(id: string): Promise<Job | null> {
+    const query = `
+      UPDATE jobs
+      SET status = 'processing', error_message = NULL, completed_at = NULL
+      WHERE id = $1
+      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+    `;
+    const result = await this.pool.query(query, [id]);
+    if (result.rowCount === 0) return null;
+    return this.mapJob(result.rows[0]);
+  }
+
+  // Update processing phase
+  async setJobProcessingPhase(id: string, phase: ProcessingPhase): Promise<Job | null> {
+    const query = `
+      UPDATE jobs
+      SET processing_phase = $2
+      WHERE id = $1
+      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+    `;
+    const result = await this.pool.query(query, [id, phase]);
+    if (result.rowCount === 0) return null;
+    return this.mapJob(result.rows[0]);
+  }
+
+  // Clear processing phase (set to NULL)
+  async clearJobProcessingPhase(id: string): Promise<Job | null> {
+    const query = `
+      UPDATE jobs
+      SET processing_phase = NULL
+      WHERE id = $1
+      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+    `;
+    const result = await this.pool.query(query, [id]);
     if (result.rowCount === 0) return null;
     return this.mapJob(result.rows[0]);
   }
@@ -176,6 +243,7 @@ export class DatabaseClient {
       id: row.id,
       clientId: row.client_id,
       status: row.status,
+      processingPhase: row.processing_phase ?? null,
       pdfUrl: row.pdf_url,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),

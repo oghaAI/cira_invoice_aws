@@ -27,6 +27,54 @@ export class WorkflowStack extends cdk.Stack {
       removalPolicy: props.config.environment === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY
     });
 
+    // Define job status/phase update helper steps
+    const startProcessingStep = new stepfunctionsTask.LambdaInvoke(this, 'StartProcessingStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'start',
+        'jobId.$': '$.jobId'
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
+    });
+
+    const setPhaseAnalyzingStep = new stepfunctionsTask.LambdaInvoke(this, 'SetPhaseAnalyzingStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'phase',
+        phase: 'analyzing_invoice',
+        'jobId.$': '$.jobId'
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
+    });
+
+    const setPhaseExtractingStep = new stepfunctionsTask.LambdaInvoke(this, 'SetPhaseExtractingStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'phase',
+        phase: 'extracting_data',
+        'jobId.$': '$.jobId'
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
+    });
+
+    const setPhaseVerifyingStep = new stepfunctionsTask.LambdaInvoke(this, 'SetPhaseVerifyingStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'phase',
+        phase: 'verifying_data',
+        'jobId.$': '$.jobId'
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
+    });
+
     // Define the OCR Processing step
     const ocrProcessingStep = new stepfunctionsTask.LambdaInvoke(this, 'OcrProcessingStep', {
       lambdaFunction: props.apiStack.ocrProcessingFunction,
@@ -57,6 +105,18 @@ export class WorkflowStack extends cdk.Stack {
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(5))
     });
 
+    const jobFailStep = new stepfunctionsTask.LambdaInvoke(this, 'JobFailStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'fail',
+        'jobId.$': '$.jobId',
+        'error.$': '$.error'
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(2))
+    });
+
     // Define error handling states
     const ocrFailedState = new stepfunctions.Fail(this, 'OcrFailed', {
       cause: 'OCR Processing failed',
@@ -78,25 +138,39 @@ export class WorkflowStack extends cdk.Stack {
     });
 
     // Create the workflow definition with error handling
-    const definition = ocrProcessingStep
-      .addCatch(ocrFailedState, {
-        errors: ['States.ALL'],
-        resultPath: '$.error'
-      })
+    const definition = startProcessingStep
+      .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+      .addCatch(jobFailStep.next(ocrFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+      .next(
+        setPhaseAnalyzingStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailStep.next(ocrFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(
+        ocrProcessingStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailStep.next(ocrFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(
+        setPhaseExtractingStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailStep.next(llmFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+      )
       .next(
         llmExtractionStep
-          .addCatch(llmFailedState, {
-            errors: ['States.ALL'],
-            resultPath: '$.error'
-          })
-          .next(
-            jobCompletionStep
-              .addCatch(jobFailedState, {
-                errors: ['States.ALL'],
-                resultPath: '$.error'
-              })
-              .next(successState)
-          )
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailStep.next(llmFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(
+        setPhaseVerifyingStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailStep.next(jobFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(
+        jobCompletionStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailStep.next(jobFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+          .next(successState)
       );
 
     // Create Step Functions IAM role
@@ -124,6 +198,10 @@ export class WorkflowStack extends cdk.Stack {
       timeout: cdk.Duration.minutes(30),
       comment: '3-step invoice processing workflow: OCR -> LLM Extraction -> Job Completion'
     });
+
+    // Expose state machine ARN to API Lambda and grant permissions to start executions
+    this.stateMachine.grantStartExecution(props.apiStack.jobManagementFunction);
+    props.apiStack.jobManagementFunction.addEnvironment('WORKFLOW_STATE_MACHINE_ARN', this.stateMachine.stateMachineArn);
 
     // Set concurrent execution limits for high throughput
     // Note: Step Functions Express workflows have built-in concurrency management

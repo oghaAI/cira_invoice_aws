@@ -1,0 +1,65 @@
+schema: 1
+story: '2.1'
+story_title: 'Step Functions Workflow'
+gate: CONCERNS
+status_reason: 'Critical testing gap - Task 7 incomplete with no unit tests implemented for core functionality.'
+reviewer: 'Quinn (Test Architect)'
+updated: '2025-01-13T12:00:00Z'
+
+top_issues:
+  - id: 'TEST-001'
+    severity: high
+    finding: 'Task 7 incomplete - missing required unit tests for POST /jobs trigger, state machine structure, and job completion'
+    suggested_action: 'Implement all three required unit tests before production deployment'
+    suggested_owner: 'dev'
+  - id: 'MNT-001'
+    severity: medium
+    finding: 'No CDK infrastructure tests for deployment validation'
+    suggested_action: 'Add CDK unit tests to validate state machine configuration and IAM permissions'
+    suggested_owner: 'dev'
+  - id: 'TEST-002'
+    severity: low
+    finding: 'Missing integration tests for complete workflow validation'
+    suggested_action: 'Consider adding end-to-end workflow tests for full OCR → LLM → Complete flow'
+    suggested_owner: 'dev'
+
+waiver: { active: false }
+
+# Extended fields
+quality_score: 70  # 100 - (20*0) - (10*3) = 70 (1 high = CONCERNS, not FAIL)
+expires: '2025-01-27T12:00:00Z'  # 2 weeks from review
+
+evidence:
+  tests_reviewed: 0  # No tests implemented
+  risks_identified: 3
+  trace:
+    ac_covered: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # All ACs functionally implemented
+    ac_gaps: [7]  # AC 7 testing requirements not met
+
+nfr_validation:
+  security:
+    status: PASS
+    notes: 'IAM permissions properly scoped, Secrets Manager integration, no data leakage in logs'
+  performance:
+    status: PASS
+    notes: 'Appropriate timeouts, retry policies, and resource allocation for workflow processing'
+  reliability:
+    status: PASS
+    notes: 'Comprehensive error handling, exponential backoff, explicit failure states'
+  maintainability:
+    status: CONCERNS
+    notes: 'Good code structure but lacks test coverage for confident maintenance'
+
+recommendations:
+  immediate:  # Must fix before production
+    - action: 'Implement Task 7 unit tests for POST /jobs trigger, state machine validation, and job completion'
+      refs: ['packages/api/src/handlers/job-management.ts', 'packages/infrastructure/src/stacks/workflow-stack.ts']
+    - action: 'Validate test coverage and update File List with test files'
+      refs: ['docs/stories/2.1.step-functions-workflow.md']
+  future:  # Can be addressed later
+    - action: 'Add integration tests for complete workflow validation'
+      refs: ['packages/api', 'packages/infrastructure']
+    - action: 'Consider performance testing for Step Functions execution limits'
+      refs: ['packages/infrastructure/src/stacks/workflow-stack.ts']
+    - action: 'Implement monitoring alerts for failed Step Functions executions'
+      refs: ['packages/infrastructure/src/stacks/monitoring-stack.ts']

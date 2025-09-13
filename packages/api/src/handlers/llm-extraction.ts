@@ -3,8 +3,9 @@ export const handler = async (event: any) => {
 
   try {
     // Get OCR results from previous step
-    const { jobId, extractedText, status } = event;
-    
+    const { jobId, status } = event;
+
+    if (!jobId) throw new Error('Missing jobId');
     if (status !== 'ocr_completed') {
       throw new Error('OCR processing not completed');
     }
@@ -34,7 +35,7 @@ export const handler = async (event: any) => {
             total: 1234.56
           }
         ],
-        tax: 0.00,
+        tax: 0.0,
         total: 1234.56
       },
       confidence: 0.92,
@@ -44,24 +45,11 @@ export const handler = async (event: any) => {
     };
 
     console.log('LLM Extraction Result:', JSON.stringify(llmResult, null, 2));
-
-    return {
-      statusCode: 200,
-      body: llmResult
-    };
-
+    // Return plain object for Step Functions chaining
+    return llmResult;
   } catch (error) {
     console.error('Error in LLM extraction:', error);
-    
-    return {
-      statusCode: 500,
-      body: {
-        jobId: event.jobId,
-        status: 'llm_failed',
-        error: 'LLM extraction failed',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString()
-      }
-    };
+    // Throw to trigger Step Functions retry/catch
+    throw error;
   }
 };

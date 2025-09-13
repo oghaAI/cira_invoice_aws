@@ -1,10 +1,10 @@
-import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
+import { APIGatewayProxyResult } from 'aws-lambda';
 import { DatabaseClient } from '@cira/database';
 import { API_VERSION } from '../index';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
 async function getDbCredentials() {
-  const secretArn = process.env.DATABASE_SECRET_ARN;
+  const secretArn = process.env['DATABASE_SECRET_ARN'];
   if (!secretArn) return { user: undefined, password: undefined };
   const client = new SecretsManagerClient({});
   const res = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
@@ -17,21 +17,21 @@ async function getDbCredentials() {
   }
 }
 
-export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+export const handler = async (event: any): Promise<APIGatewayProxyResult | any> => {
   const start = Date.now();
-  const log = (level: 'info' | 'error', message: string, extra?: Record<string, unknown>) =>
-    console.log(
-      JSON.stringify({
-        level,
-        message,
-        timestamp: new Date().toISOString(),
-        clientId: event.requestContext.identity.apiKeyId ?? null,
-        method: event.httpMethod,
-        resource: (event as any).resource,
-        path: event.path,
-        ...extra
-      })
-    );
+  const log = (level: 'info' | 'error', message: string, extra?: Record<string, unknown>) => {
+    const safe = {
+      level,
+      message,
+      timestamp: new Date().toISOString(),
+      clientId: event?.requestContext?.identity?.apiKeyId ?? null,
+      method: event?.httpMethod ?? null,
+      resource: (event as any)?.resource ?? null,
+      path: event?.path ?? null,
+      ...extra
+    } as Record<string, unknown>;
+    console.log(JSON.stringify(safe));
+  };
 
   log('info', 'Incoming request');
 
@@ -44,6 +44,53 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   const db = new DatabaseClient(dbConfig);
 
   try {
+    // Handle direct invocation by Step Functions for job updates
+    if (event && typeof event === 'object' && 'action' in event) {
+      const { action, jobId } = event as { action: string; jobId: string };
+      const db = new DatabaseClient(dbConfig);
+      try {
+        if (!jobId || typeof jobId !== 'string') {
+          return { statusCode: 400, body: JSON.stringify({ error: 'Missing jobId' }) };
+        }
+        if (action === 'start') {
+          await db.setJobStatusProcessing(jobId);
+          return { ok: true };
+        }
+        if (action === 'phase') {
+          const { phase } = event as { phase: 'analyzing_invoice' | 'extracting_data' | 'verifying_data' };
+          await db.setJobProcessingPhase(jobId, phase);
+          return { ok: true };
+        }
+        if (action === 'complete') {
+          const { result } = event as any;
+          // Persist job result if provided
+          if (result) {
+            await db.upsertJobResult({
+              jobId,
+              extractedData: result?.extractedData ?? null,
+              confidenceScore: result?.confidence ?? null,
+              tokensUsed: result?.tokensUsed ?? null
+            });
+          }
+          // Mark job as completed
+          await db.updateJobStatus(jobId, 'completed', null, new Date());
+          // Clear phase if supported
+          await db.clearJobProcessingPhase(jobId);
+          return { ok: true };
+        }
+        if (action === 'fail') {
+          const err = event?.error;
+          const errorMessage =
+            typeof err === 'string' ? err : err?.Cause || err?.Error || JSON.stringify(err ?? {});
+          await db.updateJobStatus(jobId, 'failed', errorMessage ?? 'failed');
+          await db.clearJobProcessingPhase(jobId);
+          return { ok: true };
+        }
+        return { statusCode: 400, body: JSON.stringify({ error: 'Unsupported action' }) };
+      } finally {
+        await db.end();
+      }
+    }
     const { httpMethod, resource, pathParameters, body } = event as any;
 
     // Extract client_id from API Gateway context
@@ -74,6 +121,31 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           // Note: Skipping network HEAD accessibility check due to isolated subnet; will be handled downstream
 
           const job = await db.createJob({ clientId, pdfUrl });
+
+          // Trigger Step Functions execution if configured
+          try {
+            const stateMachineArn = process.env['WORKFLOW_STATE_MACHINE_ARN'];
+            if (stateMachineArn) {
+              // Use AWS SDK v2 in runtime (excluded from bundle)
+              // eslint-disable-next-line @typescript-eslint/no-var-requires
+              const AWS = require('aws-sdk');
+              const sfn = new AWS.StepFunctions();
+              const exec = await sfn
+                .startExecution({
+                  stateMachineArn,
+                  input: JSON.stringify({ jobId: job.id, pdfUrl })
+                })
+                .promise();
+              log('info', 'Triggered Step Functions execution', { jobId: job.id, executionArn: exec.executionArn });
+            } else {
+              log('error', 'WORKFLOW_STATE_MACHINE_ARN not configured; skipping execution start', { jobId: job.id });
+            }
+          } catch (e) {
+            log('error', 'Failed to start Step Functions execution', {
+              jobId: job.id,
+              error: e instanceof Error ? e.message : String(e)
+            });
+          }
 
           const response = {
             job_id: job.id,
@@ -132,6 +204,12 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           return json(200, {
             id: job.id,
             status: job.status,
+            ...(job.status === 'processing' && (job as any).processingPhase
+              ? {
+                  phase: (job as any).processingPhase,
+                  phase_label: phaseLabel((job as any).processingPhase as any)
+                }
+              : {}),
             created_at: job.createdAt.toISOString(),
             updated_at: job.updatedAt.toISOString(),
             completed_at: job.completedAt ? job.completedAt.toISOString() : undefined
@@ -174,4 +252,17 @@ function errorBody(error_code: string, message: string) {
 
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
+function phaseLabel(phase: 'analyzing_invoice' | 'extracting_data' | 'verifying_data'): string {
+  switch (phase) {
+    case 'analyzing_invoice':
+      return 'Analyzing invoice';
+    case 'extracting_data':
+      return 'Extracting data';
+    case 'verifying_data':
+      return 'Verifying data';
+    default:
+      return 'Processing';
+  }
 }

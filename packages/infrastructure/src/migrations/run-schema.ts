@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     client_id VARCHAR(50),
     status job_status DEFAULT 'queued',
+    processing_phase TEXT CHECK (processing_phase IS NULL OR processing_phase IN ('analyzing_invoice','extracting_data','verifying_data')),
     pdf_url VARCHAR(2048) NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -43,6 +44,21 @@ DO $$ BEGIN
         BEFORE UPDATE ON jobs
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at();
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- Ensure processing_phase exists and has check constraint for existing tables
+DO $$ BEGIN
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS processing_phase TEXT;
+EXCEPTION
+    WHEN undefined_table THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_processing_phase_check CHECK (
+        processing_phase IS NULL OR processing_phase IN ('analyzing_invoice','extracting_data','verifying_data')
+    );
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;`;
