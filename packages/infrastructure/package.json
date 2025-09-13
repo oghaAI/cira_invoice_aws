@@ -6,24 +6,28 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "build:app": "npm run -w @cira/database build && rm -f ../../dist/.tsbuildinfo && tsc -p tsconfig.json",
     "dev": "tsc --watch",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "lint": "eslint --config ../../eslint.config.js src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
     "clean": "rm -rf dist",
-    "deploy": "cdk deploy",
-    "deploy:dev": "cdk deploy --context environment=dev",
-    "deploy:staging": "cdk deploy --context environment=staging",
-    "deploy:prod": "cdk deploy --context environment=prod",
+    "deploy": "npm run build:app && cdk deploy",
+    "deploy:dev": "npm run build:app && cdk deploy --context environment=dev",
+    "deploy:staging": "npm run build:app && cdk deploy --context environment=staging",
+    "deploy:prod": "npm run build:app && cdk deploy --context environment=prod",
+    "migrate:dev": "bash -c \"ARN=$(aws cloudformation describe-stacks --stack-name CiraInvoice-Api-dev --region us-east-1 --query \\\"Stacks[0].Outputs[?OutputKey=='DbMigrateFunctionArn'].OutputValue\\\" --output text) && aws lambda invoke --function-name \\\"$ARN\\\" /tmp/out.json --log-type Tail --query LogResult --output text | base64 --decode\"",
     "synth": "cdk synth",
     "diff": "cdk diff",
     "destroy": "cdk destroy"
   },
   "dependencies": {
     "@cira/shared": "*",
+    "@aws-sdk/client-secrets-manager": "^3.645.0",
     "aws-cdk-lib": "^2.214.0",
-    "constructs": "^10.4.2"
+    "constructs": "^10.4.2",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.1",
@@ -36,3 +40,4 @@
     "iac"
   ]
 }
+

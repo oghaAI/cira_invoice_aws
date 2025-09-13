@@ -22,12 +22,14 @@ const baseProps = {
   }
 };
 
-const envConfig = process.env['CDK_DEFAULT_ACCOUNT'] ? {
-  env: {
-    account: process.env['CDK_DEFAULT_ACCOUNT'],
-    region: process.env['CDK_DEFAULT_REGION'] || 'us-east-1'
-  }
-} : {};
+const envConfig = process.env['CDK_DEFAULT_ACCOUNT']
+  ? {
+      env: {
+        account: process.env['CDK_DEFAULT_ACCOUNT'],
+        region: process.env['CDK_DEFAULT_REGION'] || 'us-east-1'
+      }
+    }
+  : {};
 
 const stackProps: cdk.StackProps = {
   ...baseProps,
@@ -44,14 +46,15 @@ const databaseStack = new DatabaseStack(app, `CiraInvoice-Database-${environment
 const apiStack = new ApiStack(app, `CiraInvoice-Api-${environment}`, {
   ...stackProps,
   config,
-  database: databaseStack.database
+  databaseStack
 });
 
-// Workflow stack (depends on database)
+// Workflow stack (depends on database and API)
 const workflowStack = new WorkflowStack(app, `CiraInvoice-Workflow-${environment}`, {
   ...stackProps,
   config,
-  database: databaseStack.database
+  databaseStack,
+  apiStack
 });
 
 // Monitoring stack (depends on all other stacks)
@@ -66,5 +69,6 @@ const monitoringStack = new MonitoringStack(app, `CiraInvoice-Monitoring-${envir
 // Add dependencies
 apiStack.addDependency(databaseStack);
 workflowStack.addDependency(databaseStack);
+workflowStack.addDependency(apiStack);
 monitoringStack.addDependency(apiStack);
 monitoringStack.addDependency(workflowStack);

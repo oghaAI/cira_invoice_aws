@@ -1,0 +1,95 @@
+############################################################
+# Node/TypeScript Monorepo (pnpm)                           #
+############################################################
+
+# Dependencies
+node_modules/
+
+# Logs & diagnostics
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+report.*.json
+
+# Runtime data
+pids/
+*.pid
+*.pid.lock
+*.seed
+
+# Test outputs
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+cypress/screenshots/
+cypress/videos/
+
+# Build outputs & caches
+dist/
+build/
+out/
+tmp/
+temp/
+.cache/
+.parcel-cache/
+.eslintcache
+.turbo/
+
+# TypeScript
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Env files (keep examples)
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Editors/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.history/
+*.swp
+*.swo
+*~
+
+# Framework tooling (future UI)
+.next/
+.vercel/
+storybook-static/
+
+# AWS/CDK
+cdk.out/
+**/cdk.out/
+.aws/
+.aws-sam/
+
+# Secrets & keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+*.crt
+*.der
+cira-dev_accessKeys.csv
+*accessKey*.csv
+*accessKeys*.csv
+
+# Lockfiles for other managers (use pnpm)
+yarn.lock
+package-lock.json
+
+# Local databases & data
+*.sqlite
+*.db
+data/
+db/
+

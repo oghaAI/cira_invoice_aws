@@ -7,11 +7,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "build": "tsc -b",
+    "test": "vitest -w",
     "lint": "npm run lint --workspaces --if-present",
     "format": "npm run format --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present",
+    "clean": "rimraf dist && rimraf packages/*/dist",
     "dev": "npm run dev --workspaces --if-present",
     "deploy": "npm run deploy --workspace=packages/infrastructure",
     "setup:dev": "./scripts/setup-dev.sh",
@@ -37,6 +37,7 @@
     "eslint": "^9.35.0",
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "ts-node": "^10.9.2"
   }
 }
