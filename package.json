@@ -15,7 +15,10 @@
     "dev": "npm run dev --workspaces --if-present",
     "deploy": "npm run deploy --workspace=packages/infrastructure",
     "setup:dev": "./scripts/setup-dev.sh",
-    "test:all": "./scripts/run-tests.sh"
+    "test:all": "./scripts/run-tests.sh",
+    "bmad:refresh": "bmad-method install -f -i codex",
+    "bmad:list": "bmad-method list:agents",
+    "bmad:validate": "bmad-method validate"
   },
   "keywords": [
     "invoice",

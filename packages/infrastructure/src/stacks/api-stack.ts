@@ -173,20 +173,9 @@ export class ApiStack extends cdk.Stack {
       stage: this.api.deploymentStage
     });
 
-    // Health endpoint at root (no API key required)
-    const healthIntegration = new apigateway.MockIntegration({
-      requestTemplates: { 'application/json': '{"statusCode": 200 }' },
-      passthroughBehavior: apigateway.PassthroughBehavior.NEVER,
-      integrationResponses: [
-        {
-          statusCode: '200',
-          responseTemplates: {
-            'application/json': JSON.stringify({ status: 'ok' })
-          }
-        }
-      ]
-    });
-    this.api.root.addMethod('GET', healthIntegration, {
+    // Health endpoint at root (no API key required) -> handled by job management Lambda to enable DB check
+    const lambdaIntegration = new apigateway.LambdaIntegration(this.jobManagementFunction);
+    this.api.root.addMethod('GET', lambdaIntegration, {
       apiKeyRequired: false,
       methodResponses: [{ statusCode: '200' }]
     });
@@ -195,8 +184,7 @@ export class ApiStack extends cdk.Stack {
     const jobsResource = this.api.root.addResource('jobs');
     const jobByIdResource = jobsResource.addResource('{jobId}');
     const jobStatusResource = jobByIdResource.addResource('status');
-
-    const lambdaIntegration = new apigateway.LambdaIntegration(this.jobManagementFunction);
+    
 
     jobsResource.addMethod('POST', lambdaIntegration, { apiKeyRequired: true });
     jobByIdResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });

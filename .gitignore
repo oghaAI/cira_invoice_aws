@@ -93,3 +93,6 @@ package-lock.json
 data/
 db/
 
+# BMAD (local only)
+.bmad-core/
+.bmad-*/

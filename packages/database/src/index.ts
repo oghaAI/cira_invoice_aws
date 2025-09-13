@@ -62,6 +62,19 @@ export class DatabaseClient {
     await this.pool.end();
   }
 
+  /**
+   * Simple health check to validate database connectivity.
+   * Executes a lightweight `SELECT 1` query.
+   */
+  async healthCheck(): Promise<boolean> {
+    try {
+      const result = await this.pool.query('SELECT 1');
+      return result.rowCount === 1;
+    } catch {
+      return false;
+    }
+  }
+
   // Jobs
   async createJob(params: { clientId: string | null; pdfUrl: string }): Promise<Job> {
     const query = `
