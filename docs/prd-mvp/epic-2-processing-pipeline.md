@@ -29,19 +29,19 @@ so that **I can process documents without local storage**.
 6. Add timeout handling for network requests
 7. Log all PDF access attempts
 
-## Story 2.3: Docling OCR Integration
+## Story 2.3: Provider-Agnostic PDF→Markdown OCR
 As a **text extractor**,  
-I want **working Docling OCR integration**,  
-so that **I can convert PDF invoices to text**.
+I want **a provider-agnostic OCR adapter that converts PDFs to Markdown**,  
+so that **PDF invoices are converted to Markdown regardless of OCR provider**.
 
 ### Acceptance Criteria
-1. Implement Docling API client with authentication
-2. Create PDF submission to Docling with proper formatting
-3. Add OCR result polling with timeout (5 minutes)
-4. Implement basic retry logic (exponential backoff)
-5. Store OCR results in database
-6. Add basic error handling for service failures
-7. Log all Docling interactions
+1. Define a generic OCR provider interface (single entrypoint) that accepts a PDF by URL/stream and returns Markdown plus basic metadata (e.g., confidence, pages, processing time).
+2. Implement at least one concrete adapter behind the interface (can be any OCR API or a mock), selected via configuration (e.g., environment variable) without changing call sites.
+3. Ensure output is Markdown with reasonable structure preservation (headings, lists, tables when possible) and UTF-8 safe text.
+4. Support both synchronous and asynchronous provider flows with polling and a 5-minute timeout; include exponential backoff retries on transient errors.
+5. Map provider-specific errors to unified error categories (validation, auth, quota, timeout, server) and propagate meaningful messages.
+6. Emit structured logs for all provider interactions (provider name, request id, duration, bytes/pages processed) without leaking sensitive data.
+7. Persist the returned Markdown and metadata via the existing pipeline step for storage.
 
 ## Story 2.4: OCR Results Storage
 As a **data manager**,  

@@ -75,7 +75,12 @@ export class ApiStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'handler',
       entry: '../api/src/handlers/ocr-processing.ts',
-      environment: lambdaEnvironment,
+      environment: {
+        ...lambdaEnvironment,
+        OCR_PROVIDER: process.env['OCR_PROVIDER'] ?? 'mistral',
+        MISTRAL_OCR_API_URL: process.env['MISTRAL_OCR_API_URL'] ?? '',
+        MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'] ?? ''
+      },
       vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
