@@ -17,7 +17,9 @@
     "deploy:dev": "npm run build:app && cdk deploy --all --context environment=dev",
     "deploy:staging": "npm run build:app && cdk deploy --all --context environment=staging",
     "deploy:prod": "npm run build:app && cdk deploy --all --context environment=prod",
-    "migrate:dev": "bash -c \"ARN=$(aws cloudformation describe-stacks --stack-name CiraInvoice-Api-dev --region us-east-1 --query \\\"Stacks[0].Outputs[?OutputKey=='DbMigrateFunctionArn'].OutputValue\\\" --output text) && aws lambda invoke --function-name \\\"$ARN\\\" /tmp/out.json --log-type Tail --query LogResult --output text | base64 --decode\"",
+    "migrate:dev": "bash scripts/migrate.sh dev",
+    "migrate:staging": "bash scripts/migrate.sh staging",
+    "migrate:prod": "bash scripts/migrate.sh prod",
     "synth": "cdk synth",
     "diff": "cdk diff",
     "destroy": "cdk destroy"

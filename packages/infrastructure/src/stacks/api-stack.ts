@@ -83,19 +83,27 @@ export class ApiStack extends cdk.Stack {
     });
 
     // OCR Processing Lambda Function
+    // Build environment for OCR function, ensuring only string values are set
+    const ocrEnv: Record<string, string> = {
+      ...lambdaEnvironment,
+      OCR_PROVIDER: process.env['OCR_PROVIDER'] ?? 'mistral',
+      MISTRAL_OCR_API_URL: process.env['MISTRAL_OCR_API_URL'] ?? '',
+      MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'] ?? '',
+      ALLOWED_PDF_HOSTS: process.env['ALLOWED_PDF_HOSTS'] ?? 'api.ciranet.com',
+      OCR_TEXT_MAX_BYTES: process.env['OCR_TEXT_MAX_BYTES'] ?? '1048576',
+      OCR_RETRIEVAL_MAX_BYTES: process.env['OCR_RETRIEVAL_MAX_BYTES'] ?? '262144'
+    };
+    if (process.env['MISTRAL_OCR_MODE']) ocrEnv['MISTRAL_OCR_MODE'] = process.env['MISTRAL_OCR_MODE'] as string;
+    if (process.env['MISTRAL_OCR_SYNC_PATH']) ocrEnv['MISTRAL_OCR_SYNC_PATH'] = process.env['MISTRAL_OCR_SYNC_PATH'] as string;
+    if (process.env['MISTRAL_OCR_MODEL']) ocrEnv['MISTRAL_OCR_MODEL'] = process.env['MISTRAL_OCR_MODEL'] as string;
+    if (process.env['MISTRAL_INCLUDE_IMAGE_BASE64']) ocrEnv['MISTRAL_INCLUDE_IMAGE_BASE64'] = process.env['MISTRAL_INCLUDE_IMAGE_BASE64'] as string;
+    if (process.env['OCR_DEBUG']) ocrEnv['OCR_DEBUG'] = process.env['OCR_DEBUG'] as string;
+
     this.ocrProcessingFunction = new lambdaNodejs.NodejsFunction(this, 'OcrProcessingFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'handler',
       entry: '../api/src/handlers/ocr-processing.ts',
-      environment: {
-        ...lambdaEnvironment,
-        OCR_PROVIDER: process.env['OCR_PROVIDER'] ?? 'mistral',
-        MISTRAL_OCR_API_URL: process.env['MISTRAL_OCR_API_URL'] ?? '',
-        MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'] ?? '',
-        ALLOWED_PDF_HOSTS: process.env['ALLOWED_PDF_HOSTS'] ?? 'api.ciranet.com',
-        OCR_TEXT_MAX_BYTES: process.env['OCR_TEXT_MAX_BYTES'] ?? '1048576',
-        OCR_RETRIEVAL_MAX_BYTES: process.env['OCR_RETRIEVAL_MAX_BYTES'] ?? '262144'
-      },
+      environment: ocrEnv,
       vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
@@ -117,6 +125,7 @@ export class ApiStack extends cdk.Stack {
       environment: {
         ...lambdaEnvironment,
         // Azure OpenAI configuration (injected from deployment env)
+        AZURE_RESOURCE_NAME: process.env['AZURE_RESOURCE_NAME'] ?? '',
         AZURE_OPENAI_ENDPOINT: process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
         AZURE_OPENAI_API_KEY: process.env['AZURE_OPENAI_API_KEY'] ?? '',
         AZURE_OPENAI_DEPLOYMENT: process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
@@ -212,11 +221,13 @@ export class ApiStack extends cdk.Stack {
     const jobByIdResource = jobsResource.addResource('{jobId}');
     const jobStatusResource = jobByIdResource.addResource('status');
     const jobOcrResource = jobByIdResource.addResource('ocr');
+    const jobResultResource = jobByIdResource.addResource('result');
 
     jobsResource.addMethod('POST', lambdaIntegration, { apiKeyRequired: true });
     jobByIdResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
     jobStatusResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
     jobOcrResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
+    jobResultResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
 
     // Outputs
     new cdk.CfnOutput(this, 'ApiEndpoint', {

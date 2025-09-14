@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { createOpenAI } from '@ai-sdk/openai';
-import { generateObject, generateText, type CoreMessage } from 'ai';
+import { createAzure } from '@ai-sdk/azure';
+import { generateObject } from 'ai';
 
 export type LlmErrorCategory = 'VALIDATION' | 'AUTH' | 'QUOTA' | 'TIMEOUT' | 'SERVER' | 'FAILED_STATUS';
 
@@ -41,7 +41,7 @@ export class LlmError extends Error {
 }
 
 export interface LlmClientConfig {
-  endpoint: string;
+  resourceName: string; // e.g., cira-invoice-data-extraction
   apiKey: string;
   deployment: string; // Azure deployment name (acts as model ID)
   apiVersion: string;
@@ -56,11 +56,11 @@ export function getRequiredEnv(name: string): string {
 }
 
 export function getLlmClient(): { modelId: string; config: LlmClientConfig } {
-  const endpoint = getRequiredEnv('AZURE_OPENAI_ENDPOINT');
+  const resourceName = getRequiredEnv('AZURE_RESOURCE_NAME');
   const apiKey = getRequiredEnv('AZURE_OPENAI_API_KEY');
   const deployment = getRequiredEnv('AZURE_OPENAI_DEPLOYMENT');
-  const apiVersion = (process.env['AZURE_OPENAI_API_VERSION'] as string | undefined)?.trim() || '2024-08-01-preview';
-  return { modelId: deployment, config: { endpoint, apiKey, deployment, apiVersion } };
+  const apiVersion = (process.env['AZURE_OPENAI_API_VERSION'] as string | undefined)?.trim() || '2024-12-01-preview';
+  return { modelId: deployment, config: { resourceName, apiKey, deployment, apiVersion } };
 }
 
 function mapStatusToCategory(status: number): LlmErrorCategory {
@@ -82,7 +82,8 @@ function mapError(err: unknown): unknown {
     const status: number | undefined = anyErr.statusCode ?? anyErr.status ?? anyErr.response?.status;
     if (typeof status === 'number') {
       const category = mapStatusToCategory(status);
-      const message = typeof anyErr.message === 'string' && anyErr.message.length > 0 ? anyErr.message : `HTTP ${status}`;
+      const message =
+        typeof anyErr.message === 'string' && anyErr.message.length > 0 ? anyErr.message : `HTTP ${status}`;
       return new LlmError({ message, category, statusCode: status, provider: 'azure_openai' });
     }
   }
@@ -103,23 +104,28 @@ function log(fields: Record<string, unknown>) {
   } catch {}
 }
 
+// Minimal non-deprecated chat message type for text-only prompts
+export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+
 export type CallLlmOptions<T> = {
-  messages: CoreMessage[];
+  messages: ChatMessage[];
   schema?: z.ZodType<T>;
   timeoutMs?: number;
   maxRetries?: number;
 };
 
-export type CallLlmResult<T = unknown> = {
-  success: true;
-  data: T | string; // string for unstructured text, typed object when schema is provided
-  usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
-  durationMs: number;
-} | {
-  success: false;
-  error: LlmError;
-  durationMs: number;
-};
+export type CallLlmResult<T = unknown> =
+  | {
+      success: true;
+      data: T; // typed object when schema is provided (required)
+      usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+      durationMs: number;
+    }
+  | {
+      success: false;
+      error: LlmError;
+      durationMs: number;
+    };
 
 export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<CallLlmResult<T>> {
   const t0 = Date.now();
@@ -130,21 +136,28 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
     modelId = loaded.modelId;
     config = loaded.config;
   } catch (e) {
-    const err = e instanceof LlmError ? e : new LlmError({ message: (e as any)?.message ?? 'LLM config error', category: 'VALIDATION' });
+    const err =
+      e instanceof LlmError
+        ? e
+        : new LlmError({ message: (e as any)?.message ?? 'LLM config error', category: 'VALIDATION' });
     return { success: false, error: err, durationMs: Date.now() - t0 };
   }
 
-  // Configure Azure OpenAI provider via AI SDK
-  const openai = createOpenAI({
-    baseURL: `${config.endpoint.replace(/\/$/, '')}/openai/deployments/${encodeURIComponent(config.deployment)}?api-version=${encodeURIComponent(config.apiVersion)}`,
+  // Configure Azure OpenAI provider via AI SDK v5 Azure provider
+  // Use resourceName; provider will construct https://{resourceName}.openai.azure.com/openai/v1
+  const useDeploymentUrls = process.env['AZURE_USE_DEPLOYMENT_URLS'] === '1';
+  const azureProvider = createAzure({
+    resourceName: config.resourceName,
     apiKey: config.apiKey,
-    headers: { 'api-key': config.apiKey }
+    apiVersion: config.apiVersion,
+    useDeploymentBasedUrls: useDeploymentUrls
   });
 
-  // The callable model is the deployment name
-  const model = openai(modelId);
+  // The callable model is the deployment name (modelId)
+  const model = azureProvider(modelId);
 
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs as number) > 0 ? (opts.timeoutMs as number) : 30_000;
+  const timeoutMs =
+    Number.isFinite(opts.timeoutMs) && (opts.timeoutMs as number) > 0 ? (opts.timeoutMs as number) : 30_000;
   const maxRetries = Number.isFinite(opts.maxRetries) ? Math.max(0, Math.trunc(opts.maxRetries as number)) : 2;
 
   const attempts = [500, 1000, 2000, 4000, 4000];
@@ -155,21 +168,27 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
     const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
     const aStart = Date.now();
     try {
-      if (opts.schema) {
-        const result = await __aiFns.generateObject({ model, messages: opts.messages, schema: opts.schema, abortSignal: controller.signal });
-        clearTimeout(timer);
-        const durationMs = Date.now() - t0;
-        const usage = result.usage as any;
-        log({ provider: 'azure_openai', model: modelId, attempt, durationMs: Date.now() - aStart, status: 'ok', tokens: usage?.totalTokens });
-        return { success: true, data: result.object as T, usage, durationMs };
-      } else {
-        const result = await __aiFns.generateText({ model, messages: opts.messages, abortSignal: controller.signal });
-        clearTimeout(timer);
-        const durationMs = Date.now() - t0;
-        const usage = result.usage as any;
-        log({ provider: 'azure_openai', model: modelId, attempt, durationMs: Date.now() - aStart, status: 'ok', tokens: usage?.totalTokens });
-        return { success: true, data: result.text, usage, durationMs };
+      if (!opts.schema) {
+        throw new LlmError({ message: 'Schema required for structured generation', category: 'VALIDATION' });
       }
+      const result = await __aiFns.generateObject({
+        model,
+        messages: opts.messages as any,
+        schema: opts.schema,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      const durationMs = Date.now() - t0;
+      const usage = result.usage as any;
+      log({
+        provider: 'azure_openai',
+        model: modelId,
+        attempt,
+        durationMs: Date.now() - aStart,
+        status: 'ok',
+        tokens: usage?.totalTokens
+      });
+      return { success: true, data: result.object as T, usage, durationMs };
     } catch (e) {
       clearTimeout(timer);
       const err = mapError(e);
@@ -207,13 +226,13 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
 }
 
 export interface ConfidenceWeights {
-  amounts?: number;        // invoice_*_amount fields
-  dates?: number;          // *_date fields
-  identifiers?: number;    // invoice_number, policy_number, account_number
-  addresses?: number;      // payment_remittance_* fields
-  names?: number;          // vendor_name, community_name, etc.
-  validation?: number;     // valid_input field
-  default?: number;        // fallback for uncategorized fields
+  amounts?: number; // invoice_*_amount fields
+  dates?: number; // *_date fields
+  identifiers?: number; // invoice_number, policy_number, account_number
+  addresses?: number; // payment_remittance_* fields
+  names?: number; // vendor_name, community_name, etc.
+  validation?: number; // valid_input field
+  default?: number; // fallback for uncategorized fields
 }
 
 export interface ExtractStructuredOptions {
@@ -236,9 +255,7 @@ export async function extractStructured<T>(
 Document content:
 ${input.markdown}`;
 
-  const messages: CoreMessage[] = [
-    { role: 'user', content: prompt }
-  ];
+  const messages: ChatMessage[] = [{ role: 'user', content: prompt }];
 
   const result = await callLlm({
     messages,
@@ -336,29 +353,25 @@ function calculateWeightedConfidence<T>(data: T, weights?: ConfidenceWeights): n
   if (fieldScores.length === 0) return 0;
 
   // Calculate weighted average
-  const totalWeightedScore = fieldScores.reduce((sum, item) => sum + (item.score * item.weight), 0);
+  const totalWeightedScore = fieldScores.reduce((sum, item) => sum + item.score * item.weight, 0);
   const totalWeight = fieldScores.reduce((sum, item) => sum + item.weight, 0);
 
   return totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
 }
 
-export type { CoreMessage };
+// no export of deprecated CoreMessage
 
 // Test seam for injecting AI SDK functions in unit tests without ESM namespace spying
 type AiFns = {
-  generateText: typeof generateText;
   generateObject: typeof generateObject;
 };
 
-let __aiFns: AiFns = {
-  generateText,
-  generateObject
-};
+let __aiFns: AiFns = { generateObject };
 
 export function __setAiFns(fns: Partial<AiFns>) {
   __aiFns = { ...__aiFns, ...fns };
 }
 
 export function __resetAiFns() {
-  __aiFns = { generateText, generateObject };
+  __aiFns = { generateObject };
 }

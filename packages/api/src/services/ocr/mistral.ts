@@ -29,7 +29,11 @@ export function mistralProvider(): OcrProvider {
   const isSyncMode = ocrMode === 'sync';
   const ocrModel = (process.env['MISTRAL_OCR_MODEL'] as string | undefined) || 'mistral-ocr-latest';
   const includeImageBase64 = (process.env['MISTRAL_INCLUDE_IMAGE_BASE64'] as string | undefined) !== '0';
-  const syncPathEnv = (process.env['MISTRAL_OCR_SYNC_PATH'] as string | undefined)?.trim() || '';
+  // Auto-detect sensible default for sync path to avoid double /ocr or missing path
+  // If base URL already ends with /ocr, default to '' (post to base). Otherwise, default to 'ocr'.
+  const baseEndsWithOcr = /(^|\/)ocr\/?$/.test(new URL(baseUrl).pathname);
+  const syncPathDefault = baseEndsWithOcr ? '' : 'ocr';
+  const syncPathEnv = ((process.env['MISTRAL_OCR_SYNC_PATH'] as string | undefined)?.trim() ?? syncPathDefault);
 
   async function http<T>(path: string, init: RequestInit & { method: string }): Promise<{ data: T; requestId: string | null; status: number }> {
     const url = path.startsWith('http') ? path : `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;

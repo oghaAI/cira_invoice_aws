@@ -4,10 +4,36 @@ import { DatabaseClient } from '@cira/database';
 
 function now() { return Date.now(); }
 
+async function getDbCredentials() {
+  const secretArn = process.env['DATABASE_SECRET_ARN'];
+  // Fallback to explicit envs if provided
+  const envUser = process.env['DB_USER'];
+  const envPassword = process.env['DB_PASSWORD'];
+  if (envUser || envPassword) {
+    return { user: envUser, password: envPassword } as { user?: string; password?: string };
+  }
+  if (!secretArn) return { user: undefined, password: undefined };
+  // Lazy import AWS SDK v3 to avoid loading in unit tests
+  const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
+  const client = new SecretsManagerClient({});
+  const res = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+  const secretString = res.SecretString ?? Buffer.from(res.SecretBinary ?? '').toString('utf8');
+  try {
+    const parsed = JSON.parse(secretString || '{}');
+    return { user: parsed.username, password: parsed.password } as { user?: string; password?: string };
+  } catch {
+    return { user: undefined, password: undefined };
+  }
+}
+
 export const handler = async (event: any) => {
   const t0 = now();
   const jobId = event?.jobId ?? null;
   const ocr = event?.ocr;
+  // Support both shapes:
+  // A) { ocr: { metadata: {...} } }
+  // B) { ocr: { ocr: { metadata: {...} }, status, jobId } }
+  const ocrMetadata = ocr?.metadata ?? ocr?.ocr?.metadata;
 
   const log = (fields: Record<string, unknown>) => {
     const base = { timestamp: new Date().toISOString(), jobId, durationMs: now() - t0, ...fields };
@@ -20,18 +46,16 @@ export const handler = async (event: any) => {
       log({ decision: 'VALIDATION', reason: 'missing_jobId' });
       throw new Error('Missing jobId');
     }
-    if (!ocr?.metadata) {
+    if (!ocrMetadata) {
       log({ decision: 'VALIDATION', reason: 'missing_ocr_metadata' });
       throw new Error('OCR metadata missing');
     }
 
     // Load database configuration (matching OCR handler pattern)
     const dbConfig: any = { ssl: true };
-    const creds: any = {};
     if (process.env['DATABASE_PROXY_ENDPOINT']) dbConfig.host = process.env['DATABASE_PROXY_ENDPOINT'];
     if (process.env['DATABASE_NAME']) dbConfig.database = process.env['DATABASE_NAME'];
-    if (process.env['DB_USER']) creds.user = process.env['DB_USER'];
-    if (process.env['DB_PASSWORD']) creds.password = process.env['DB_PASSWORD'];
+    const creds = await getDbCredentials();
     if (creds.user) dbConfig.user = creds.user;
     if (creds.password) dbConfig.password = creds.password;
 

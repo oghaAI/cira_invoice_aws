@@ -261,6 +261,52 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
             completed_at: job.completedAt ? job.completedAt.toISOString() : undefined
           });
         }
+
+        if (resource === '/jobs/{jobId}/result' && pathParameters?.jobId) {
+          const jobId = pathParameters.jobId;
+          if (!isUuid(jobId)) {
+            return json(400, errorBody('VALIDATION_ERROR', 'job_id must be a valid UUID'));
+          }
+          const job = await db.getJobById(jobId);
+          if (!job) {
+            return json(404, errorBody('NOT_FOUND', 'Job not found'));
+          }
+          if (clientId && job.clientId && clientId !== job.clientId) {
+            return json(404, errorBody('NOT_FOUND', 'Job not found'));
+          }
+          if (job.status !== 'completed') {
+            return json(404, errorBody('NOT_FOUND', 'Job not completed'));
+          }
+
+          const result = await db.getJobResult(jobId);
+          if (!result) {
+            return json(404, errorBody('NOT_FOUND', 'Result not found'));
+          }
+
+          // Validate extracted_data shape loosely - allow extra keys
+          const extractedData = result.extractedData;
+          if (extractedData && typeof extractedData !== 'object') {
+            log('error', 'Invalid extracted_data shape', { jobId, type: typeof extractedData });
+            return json(500, errorBody('INTERNAL_SERVER_ERROR', 'Invalid result format'));
+          }
+
+          // Build response with all result data including OCR markdown
+          const response = {
+            job_id: job.id,
+            extracted_data: extractedData,
+            confidence_score: result.confidenceScore,
+            tokens_used: result.tokensUsed,
+            raw_ocr_markdown: result.rawOcrText
+          };
+
+          log('info', 'Result retrieval', {
+            jobId: job.id,
+            hasExtractedData: !!extractedData,
+            confidenceScore: result.confidenceScore,
+            tokensUsed: result.tokensUsed
+          });
+          return json(200, response);
+        }
         break;
       }
       default:
