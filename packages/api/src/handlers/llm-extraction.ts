@@ -1,5 +1,6 @@
-import { callLlm } from '../services/llm/client';
-import { buildInvoiceExtractionPrompt } from '../services/llm/prompts/invoice';
+import { extractStructured } from '../services/llm/client';
+import { InvoiceSchema } from '../services/llm/schemas/invoice';
+import { DatabaseClient } from '@cira/database';
 
 function now() { return Date.now(); }
 
@@ -23,40 +24,47 @@ export const handler = async (event: any) => {
       return { statusCode: 400, error_code: 'VALIDATION', message: 'OCR not completed' };
     }
 
-    // For Story 3.1: scaffold only. We intentionally do not load PII/markdown here.
-    // Provide minimal safe content; in Story 3.2 we will supply schema + real OCR text.
-    const messages = buildInvoiceExtractionPrompt('(OCR text available in DB; omitted from logs)');
+    // Load database configuration
+    const dbConfig: any = {};
+    const creds: any = {};
+    if (process.env['DB_HOST']) dbConfig.host = process.env['DB_HOST'];
+    if (process.env['DB_PORT']) dbConfig.port = parseInt(process.env['DB_PORT'], 10);
+    if (process.env['DB_NAME']) dbConfig.database = process.env['DB_NAME'];
+    if (process.env['DB_USER']) creds.user = process.env['DB_USER'];
+    if (process.env['DB_PASSWORD']) creds.password = process.env['DB_PASSWORD'];
+    if (creds.user) dbConfig.user = creds.user;
+    if (creds.password) dbConfig.password = creds.password;
 
-    const result = await callLlm({ messages, timeoutMs: 30_000, maxRetries: 2 });
+    const db = new DatabaseClient(dbConfig);
 
-    if (!result.success) {
-      const cat = result.error.category;
-      const statusByCat: Record<string, number> = {
-        VALIDATION: 400,
-        AUTH: 401,
-        QUOTA: 429,
-        TIMEOUT: 504,
-        SERVER: 502,
-        FAILED_STATUS: 502
-      };
-      log({ decision: 'LLM_ERROR', category: cat });
-      return { statusCode: statusByCat[cat] ?? 502, error_code: cat, message: result.error.message };
+    // Load OCR text from prior step
+    const jobResult = await db.getJobResult(jobId);
+    if (!jobResult || !jobResult.rawOcrText) {
+      log({ decision: 'VALIDATION', reason: 'no_ocr_text' });
+      return { statusCode: 400, error_code: 'VALIDATION', message: 'No OCR text available' };
     }
 
-    const tokens = result.usage?.totalTokens ?? null;
-    log({ decision: 'OK', tokens });
+    // Extract structured data using the invoice schema
+    const extractionResult = await extractStructured(InvoiceSchema, {
+      markdown: jobResult.rawOcrText
+    });
 
-    // Minimal Step Functions output; no PII
+    // Persist extracted data and tokens used
+    await db.upsertJobResult({
+      jobId,
+      extractedData: extractionResult.data,
+      tokensUsed: extractionResult.tokensUsed ?? null
+    });
+
+    const tokens = extractionResult.tokensUsed ?? null;
+    log({ decision: 'OK', tokens, confidence: extractionResult.confidence });
+
+    // Return object for Step Functions
     return {
       jobId,
       status: 'llm_completed',
-      llm: {
-        provider: 'azure_openai',
-        metadata: {
-          durationMs: result.durationMs,
-          tokens
-        }
-      }
+      extractedData: extractionResult.data,
+      tokensUsed: tokens
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

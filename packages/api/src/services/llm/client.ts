@@ -206,6 +206,142 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
   }
 }
 
+export interface ConfidenceWeights {
+  amounts?: number;        // invoice_*_amount fields
+  dates?: number;          // *_date fields
+  identifiers?: number;    // invoice_number, policy_number, account_number
+  addresses?: number;      // payment_remittance_* fields
+  names?: number;          // vendor_name, community_name, etc.
+  validation?: number;     // valid_input field
+  default?: number;        // fallback for uncategorized fields
+}
+
+export interface ExtractStructuredOptions {
+  confidenceWeights?: ConfidenceWeights;
+}
+
+export type ExtractStructuredResult<T> = {
+  data: T;
+  tokensUsed?: number | undefined;
+  confidence?: number | undefined;
+};
+
+export async function extractStructured<T>(
+  schema: z.ZodType<T>,
+  input: { markdown: string },
+  options?: ExtractStructuredOptions
+): Promise<ExtractStructuredResult<T>> {
+  const prompt = `Extract structured data from the following invoice document. Return only fields in the schema, plus reasoning (1–2 sentences for every field, including when null) and confidence (one of: low, medium, high) for every field. For null fields, explain why and set confidence accordingly. Do not return decimals.
+
+Document content:
+${input.markdown}`;
+
+  const messages: CoreMessage[] = [
+    { role: 'user', content: prompt }
+  ];
+
+  const result = await callLlm({
+    messages,
+    schema,
+    timeoutMs: 60000, // 60 seconds for complex extraction
+    maxRetries: 3
+  });
+
+  if (!result.success) {
+    throw result.error;
+  }
+
+  // Apply minimal normalization
+  const normalizedData = normalizeExtractedData(result.data as T);
+
+  return {
+    data: normalizedData,
+    tokensUsed: result.usage?.totalTokens,
+    confidence: calculateWeightedConfidence(normalizedData, options?.confidenceWeights)
+  };
+}
+
+function normalizeExtractedData<T>(data: T): T {
+  if (data === null || data === undefined || typeof data !== 'object') {
+    return data;
+  }
+
+  const normalized = { ...data } as any;
+
+  // Normalize all string values by trimming
+  for (const [key, value] of Object.entries(normalized)) {
+    if (value && typeof value === 'object' && 'value' in value) {
+      const fieldData = value as any;
+      if (typeof fieldData.value === 'string') {
+        fieldData.value = fieldData.value.trim() || null;
+      }
+      // Optional: Convert numeric-like strings to numbers safely for amount fields
+      if (typeof fieldData.value === 'string' && fieldData.value !== null && key.includes('amount')) {
+        const numericValue = parseFloat(fieldData.value);
+        if (!isNaN(numericValue) && isFinite(numericValue)) {
+          fieldData.value = numericValue;
+        }
+      }
+    }
+  }
+
+  return normalized;
+}
+
+function getFieldCategory(fieldName: string): keyof ConfidenceWeights {
+  if (fieldName.includes('amount')) return 'amounts';
+  if (fieldName.includes('date')) return 'dates';
+  if (['invoice_number', 'policy_number', 'account_number'].includes(fieldName)) return 'identifiers';
+  if (fieldName.startsWith('payment_remittance_')) return 'addresses';
+  if (['vendor_name', 'community_name'].includes(fieldName)) return 'names';
+  if (fieldName === 'valid_input') return 'validation';
+  return 'default';
+}
+
+function calculateWeightedConfidence<T>(data: T, weights?: ConfidenceWeights): number {
+  if (!data || typeof data !== 'object') return 0;
+
+  // Default weights
+  const defaultWeights: Required<ConfidenceWeights> = {
+    amounts: 0.3,
+    dates: 0.25,
+    identifiers: 0.2,
+    addresses: 0.1,
+    names: 0.1,
+    validation: 0.05,
+    default: 0.1
+  };
+
+  const finalWeights = { ...defaultWeights, ...weights };
+
+  const fieldScores: Array<{ score: number; weight: number }> = [];
+
+  for (const [fieldName, value] of Object.entries(data)) {
+    if (value && typeof value === 'object' && 'confidence' in value) {
+      const fieldData = value as any;
+      const confidenceLevel = fieldData.confidence;
+
+      let score = 0;
+      if (confidenceLevel === 'high') score = 0.9;
+      else if (confidenceLevel === 'medium') score = 0.6;
+      else if (confidenceLevel === 'low') score = 0.3;
+
+      const category = getFieldCategory(fieldName);
+      const weight = finalWeights[category];
+
+      fieldScores.push({ score, weight });
+    }
+  }
+
+  if (fieldScores.length === 0) return 0;
+
+  // Calculate weighted average
+  const totalWeightedScore = fieldScores.reduce((sum, item) => sum + (item.score * item.weight), 0);
+  const totalWeight = fieldScores.reduce((sum, item) => sum + item.weight, 0);
+
+  return totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+}
+
 export type { CoreMessage };
 
 // Test seam for injecting AI SDK functions in unit tests without ESM namespace spying
