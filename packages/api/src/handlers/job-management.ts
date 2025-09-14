@@ -8,13 +8,18 @@ import { NodeHttpHandler } from '@smithy/node-http-handler';
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
   if (!secretArn) return { user: undefined, password: undefined };
-  const client = new SecretsManagerClient({});
-  const res = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
-  const secretString = res.SecretString ?? Buffer.from(res.SecretBinary ?? '').toString('utf8');
   try {
-    const parsed = JSON.parse(secretString || '{}');
-    return { user: parsed.username, password: parsed.password } as { user?: string; password?: string };
+    const client = new SecretsManagerClient({});
+    const res = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+    const secretString = res.SecretString ?? Buffer.from(res.SecretBinary ?? '').toString('utf8');
+    try {
+      const parsed = JSON.parse(secretString || '{}');
+      return { user: parsed.username, password: parsed.password } as { user?: string; password?: string };
+    } catch {
+      return { user: undefined, password: undefined };
+    }
   } catch {
+    // In local/test environments without AWS access, fall back gracefully
     return { user: undefined, password: undefined };
   }
 }

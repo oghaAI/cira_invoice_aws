@@ -114,7 +114,14 @@ export class ApiStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'handler',
       entry: '../api/src/handlers/llm-extraction.ts',
-      environment: lambdaEnvironment,
+      environment: {
+        ...lambdaEnvironment,
+        // Azure OpenAI configuration (injected from deployment env)
+        AZURE_OPENAI_ENDPOINT: process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
+        AZURE_OPENAI_API_KEY: process.env['AZURE_OPENAI_API_KEY'] ?? '',
+        AZURE_OPENAI_DEPLOYMENT: process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
+        AZURE_OPENAI_API_VERSION: process.env['AZURE_OPENAI_API_VERSION'] ?? '2024-08-01-preview'
+      },
       vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
       vpcSubnets: {
         subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
