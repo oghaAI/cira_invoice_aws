@@ -34,7 +34,8 @@ export class WorkflowStack extends cdk.Stack {
         action: 'start',
         'jobId.$': '$.jobId'
       }),
-      outputPath: '$.Payload',
+      // We don't need the result, preserve original input (jobId, pdfUrl)
+      resultPath: stepfunctions.JsonPath.DISCARD,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
     });
@@ -46,7 +47,7 @@ export class WorkflowStack extends cdk.Stack {
         phase: 'analyzing_invoice',
         'jobId.$': '$.jobId'
       }),
-      outputPath: '$.Payload',
+      resultPath: stepfunctions.JsonPath.DISCARD,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
     });
@@ -58,7 +59,7 @@ export class WorkflowStack extends cdk.Stack {
         phase: 'extracting_data',
         'jobId.$': '$.jobId'
       }),
-      outputPath: '$.Payload',
+      resultPath: stepfunctions.JsonPath.DISCARD,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
     });
@@ -70,7 +71,7 @@ export class WorkflowStack extends cdk.Stack {
         phase: 'verifying_data',
         'jobId.$': '$.jobId'
       }),
-      outputPath: '$.Payload',
+      resultPath: stepfunctions.JsonPath.DISCARD,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(1))
     });
@@ -78,15 +79,20 @@ export class WorkflowStack extends cdk.Stack {
     // Define the OCR Processing step
     const ocrProcessingStep = new stepfunctionsTask.LambdaInvoke(this, 'OcrProcessingStep', {
       lambdaFunction: props.apiStack.ocrProcessingFunction,
-      outputPath: '$.Payload',
+      // Put only the Lambda payload in the task result and store it under $.ocr
+      payloadResponseOnly: true,
+      resultPath: '$.ocr',
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(15))
     });
 
+    // If OCR returned an error object (statusCode present), fail gracefully using that
+    const ocrErrorChoice = new stepfunctions.Choice(this, 'OcrResultOk?');
+
     // Define the LLM Extraction step
     const llmExtractionStep = new stepfunctionsTask.LambdaInvoke(this, 'LlmExtractionStep', {
       lambdaFunction: props.apiStack.llmExtractionFunction,
-      outputPath: '$.Payload',
+      payloadResponseOnly: true,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(15))
     });
@@ -100,19 +106,57 @@ export class WorkflowStack extends cdk.Stack {
         'result.$': '$.result',
         'metadata.$': '$.metadata'
       }),
-      outputPath: '$.Payload',
+      resultPath: stepfunctions.JsonPath.DISCARD,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(5))
     });
 
-    const jobFailStep = new stepfunctionsTask.LambdaInvoke(this, 'JobFailStep', {
+    // Separate fail steps to allow distinct Next targets per failure type
+    const jobFailOcrStep = new stepfunctionsTask.LambdaInvoke(this, 'JobFailOcrStep', {
       lambdaFunction: props.apiStack.jobManagementFunction,
       payload: stepfunctions.TaskInput.fromObject({
         action: 'fail',
         'jobId.$': '$.jobId',
         'error.$': '$.error'
       }),
-      outputPath: '$.Payload',
+      resultPath: stepfunctions.JsonPath.DISCARD,
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(2))
+    });
+
+    // Dedicated fail step that reads error from $.ocr (used when OCR returns error object)
+    const jobFailFromOcrStep = new stepfunctionsTask.LambdaInvoke(this, 'JobFailFromOcrStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'fail',
+        'jobId.$': '$.jobId',
+        'error.$': '$.ocr'
+      }),
+      resultPath: stepfunctions.JsonPath.DISCARD,
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(2))
+    });
+
+    const jobFailLlmStep = new stepfunctionsTask.LambdaInvoke(this, 'JobFailLlmStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'fail',
+        'jobId.$': '$.jobId',
+        'error.$': '$.error'
+      }),
+      resultPath: stepfunctions.JsonPath.DISCARD,
+      retryOnServiceExceptions: true,
+      taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(2))
+    });
+
+    const jobFailCompleteStep = new stepfunctionsTask.LambdaInvoke(this, 'JobFailCompleteStep', {
+      lambdaFunction: props.apiStack.jobManagementFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'fail',
+        'jobId.$': '$.jobId',
+        'error.$': '$.error'
+      }),
+      resultPath: stepfunctions.JsonPath.DISCARD,
       retryOnServiceExceptions: true,
       taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.minutes(2))
     });
@@ -137,41 +181,55 @@ export class WorkflowStack extends cdk.Stack {
       comment: 'Invoice processing completed successfully'
     });
 
-    // Create the workflow definition with error handling
-    const definition = startProcessingStep
-      .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-      .addCatch(jobFailStep.next(ocrFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
-      .next(
-        setPhaseAnalyzingStep
-          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-          .addCatch(jobFailStep.next(ocrFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
-      )
-      .next(
-        ocrProcessingStep
-          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-          .addCatch(jobFailStep.next(ocrFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
-      )
-      .next(
+    // Build the success path after OCR as a chain
+    const successFlow = stepfunctions.Chain
+      .start(
         setPhaseExtractingStep
           .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-          .addCatch(jobFailStep.next(llmFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+          .addCatch(jobFailLlmStep, { errors: ['States.ALL'], resultPath: '$.error' })
       )
       .next(
         llmExtractionStep
           .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-          .addCatch(jobFailStep.next(llmFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+          .addCatch(jobFailLlmStep, { errors: ['States.ALL'], resultPath: '$.error' })
       )
       .next(
         setPhaseVerifyingStep
           .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-          .addCatch(jobFailStep.next(jobFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
+          .addCatch(jobFailCompleteStep, { errors: ['States.ALL'], resultPath: '$.error' })
       )
       .next(
         jobCompletionStep
           .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
-          .addCatch(jobFailStep.next(jobFailedState), { errors: ['States.ALL'], resultPath: '$.error' })
-          .next(successState)
+          .addCatch(jobFailCompleteStep, { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(successState);
+
+    // Create the workflow definition with error handling
+    const definition = startProcessingStep
+      .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+      .addCatch(jobFailOcrStep, { errors: ['States.ALL'], resultPath: '$.error' })
+      .next(
+        setPhaseAnalyzingStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailOcrStep, { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(
+        ocrProcessingStep
+          .addRetry({ maxAttempts: 3, backoffRate: 2.0, interval: cdk.Duration.seconds(2), maxDelay: cdk.Duration.seconds(30) as any })
+          .addCatch(jobFailOcrStep, { errors: ['States.ALL'], resultPath: '$.error' })
+      )
+      .next(
+        ocrErrorChoice
+          .when(stepfunctions.Condition.isPresent('$.ocr.statusCode'), jobFailFromOcrStep)
+          .otherwise(successFlow)
       );
+
+    // Chain fail handlers to terminal Fail states (only once per handler)
+    jobFailOcrStep.next(ocrFailedState);
+    jobFailFromOcrStep.next(ocrFailedState);
+    jobFailLlmStep.next(llmFailedState);
+    jobFailCompleteStep.next(jobFailedState);
 
     // Create Step Functions IAM role
     const stepFunctionsRole = new iam.Role(this, 'StepFunctionsRole', {
@@ -199,9 +257,9 @@ export class WorkflowStack extends cdk.Stack {
       comment: '3-step invoice processing workflow: OCR -> LLM Extraction -> Job Completion'
     });
 
-    // Expose state machine ARN to API Lambda and grant permissions to start executions
-    this.stateMachine.grantStartExecution(props.apiStack.jobManagementFunction);
-    props.apiStack.jobManagementFunction.addEnvironment('WORKFLOW_STATE_MACHINE_ARN', this.stateMachine.stateMachineArn);
+    // Note: Avoid adding references from ApiStack -> WorkflowStack to prevent cyclic dependencies.
+    // You can set WORKFLOW_STATE_MACHINE_ARN on the JobManagement Lambda out-of-band if needed,
+    // or grant permissions via a wildcard IAM policy in ApiStack.
 
     // Set concurrent execution limits for high throughput
     // Note: Step Functions Express workflows have built-in concurrency management

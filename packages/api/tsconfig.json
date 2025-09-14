@@ -1,11 +1,13 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "composite": true,
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": "./src",
     "paths": {
-      "@cira/shared": ["../shared/src"]
+      "@cira/shared": ["../shared/src"],
+      "@cira/database": ["../database/src"]
     }
   },
   "include": [

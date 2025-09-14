@@ -25,6 +25,10 @@ export interface JobResult {
   extractedData: unknown | null;
   confidenceScore: number | null;
   tokensUsed: number | null;
+  rawOcrText: string | null;
+  ocrProvider: string | null;
+  ocrDurationMs: number | null;
+  ocrPages: number | null;
   createdAt: Date;
 }
 
@@ -59,9 +63,13 @@ export interface IDatabaseClient {
   // results
   upsertJobResult(params: {
     jobId: string;
-    extractedData: unknown;
-    confidenceScore: number | null;
-    tokensUsed: number | null;
+    extractedData?: unknown | null;
+    confidenceScore?: number | null;
+    tokensUsed?: number | null;
+    rawOcrText?: string | null;
+    ocrProvider?: string | null;
+    ocrDurationMs?: number | null;
+    ocrPages?: number | null;
   }): Promise<JobResult>;
   getJobResult(jobId: string): Promise<JobResult | null>;
 }
@@ -206,22 +214,41 @@ export class DatabaseClient implements IDatabaseClient {
   // Job Results
   async upsertJobResult(params: {
     jobId: string;
-    extractedData: unknown;
-    confidenceScore: number | null;
-    tokensUsed: number | null;
+    extractedData?: unknown | null;
+    confidenceScore?: number | null;
+    tokensUsed?: number | null;
+    rawOcrText?: string | null;
+    ocrProvider?: string | null;
+    ocrDurationMs?: number | null;
+    ocrPages?: number | null;
   }): Promise<JobResult> {
     const query = `
-      INSERT INTO job_results (job_id, extracted_data, confidence_score, tokens_used)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO job_results (job_id, extracted_data, confidence_score, tokens_used, raw_ocr_text, ocr_provider, ocr_duration_ms, ocr_pages)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (job_id)
-      DO UPDATE SET extracted_data = EXCLUDED.extracted_data, confidence_score = EXCLUDED.confidence_score, tokens_used = EXCLUDED.tokens_used
-      RETURNING id, job_id, extracted_data, confidence_score, tokens_used, created_at
+      DO UPDATE SET 
+        extracted_data = COALESCE(EXCLUDED.extracted_data, job_results.extracted_data),
+        confidence_score = COALESCE(EXCLUDED.confidence_score, job_results.confidence_score),
+        tokens_used = COALESCE(EXCLUDED.tokens_used, job_results.tokens_used),
+        raw_ocr_text = COALESCE(EXCLUDED.raw_ocr_text, job_results.raw_ocr_text),
+        ocr_provider = COALESCE(EXCLUDED.ocr_provider, job_results.ocr_provider),
+        ocr_duration_ms = COALESCE(EXCLUDED.ocr_duration_ms, job_results.ocr_duration_ms),
+        ocr_pages = COALESCE(EXCLUDED.ocr_pages, job_results.ocr_pages)
+      RETURNING id, job_id, extracted_data, confidence_score, tokens_used, raw_ocr_text, ocr_provider, ocr_duration_ms, ocr_pages, created_at
     `;
     const result = await this.pool.query(query, [
       params.jobId,
-      JSON.stringify(params.extractedData ?? null),
-      params.confidenceScore,
-      params.tokensUsed
+      params.extractedData === undefined ? null : JSON.stringify(params.extractedData),
+      params.confidenceScore ?? null,
+      params.tokensUsed ?? null,
+      params.rawOcrText ?? null,
+      params.ocrProvider ?? null,
+      (typeof params.ocrDurationMs === 'number' && Number.isFinite(params.ocrDurationMs)
+        ? Math.trunc(params.ocrDurationMs)
+        : null),
+      (typeof params.ocrPages === 'number' && Number.isFinite(params.ocrPages)
+        ? Math.trunc(params.ocrPages)
+        : null)
     ]);
     const row = result.rows[0];
     return this.mapJobResult(row);
@@ -229,7 +256,7 @@ export class DatabaseClient implements IDatabaseClient {
 
   async getJobResult(jobId: string): Promise<JobResult | null> {
     const query = `
-      SELECT id, job_id, extracted_data, confidence_score, tokens_used, created_at
+      SELECT id, job_id, extracted_data, confidence_score, tokens_used, raw_ocr_text, ocr_provider, ocr_duration_ms, ocr_pages, created_at
       FROM job_results
       WHERE job_id = $1
     `;
@@ -261,6 +288,10 @@ export class DatabaseClient implements IDatabaseClient {
         : null,
       confidenceScore: row.confidence_score !== null ? Number(row.confidence_score) : null,
       tokensUsed: row.tokens_used !== null ? Number(row.tokens_used) : null,
+      rawOcrText: row.raw_ocr_text ?? null,
+      ocrProvider: row.ocr_provider ?? null,
+      ocrDurationMs: row.ocr_duration_ms !== null && row.ocr_duration_ms !== undefined ? Number(row.ocr_duration_ms) : null,
+      ocrPages: row.ocr_pages !== null && row.ocr_pages !== undefined ? Number(row.ocr_pages) : null,
       createdAt: new Date(row.created_at)
     };
   }

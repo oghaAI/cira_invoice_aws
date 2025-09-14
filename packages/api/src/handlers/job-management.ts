@@ -2,6 +2,8 @@ import { APIGatewayProxyResult } from 'aws-lambda';
 import { DatabaseClient } from '@cira/database';
 import { API_VERSION } from '../index';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
@@ -126,16 +128,15 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
           try {
             const stateMachineArn = process.env['WORKFLOW_STATE_MACHINE_ARN'];
             if (stateMachineArn) {
-              // Use AWS SDK v2 in runtime (excluded from bundle)
-              // eslint-disable-next-line @typescript-eslint/no-var-requires
-              const AWS = require('aws-sdk');
-              const sfn = new AWS.StepFunctions();
-              const exec = await sfn
-                .startExecution({
-                  stateMachineArn,
-                  input: JSON.stringify({ jobId: job.id, pdfUrl })
-                })
-                .promise();
+              // Use short HTTP timeouts so API doesn't hang if SFN endpoint is unreachable
+              const sfn = new SFNClient({
+                requestHandler: new NodeHttpHandler({ connectionTimeout: 1500, requestTimeout: 3000 })
+              });
+              const cmd = new StartExecutionCommand({
+                stateMachineArn,
+                input: JSON.stringify({ jobId: job.id, pdfUrl })
+              });
+              const exec = await sfn.send(cmd);
               log('info', 'Triggered Step Functions execution', { jobId: job.id, executionArn: exec.executionArn });
             } else {
               log('error', 'WORKFLOW_STATE_MACHINE_ARN not configured; skipping execution start', { jobId: job.id });
@@ -167,6 +168,46 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
             timestamp: new Date().toISOString(),
             database: healthy ? 'connected' : 'disconnected'
           } as const;
+          return json(200, body);
+        }
+
+        if (resource === '/jobs/{jobId}/ocr' && pathParameters?.jobId) {
+          const jobId = pathParameters.jobId;
+          const job = await db.getJobById(jobId);
+          if (!job) {
+            return json(404, errorBody('NOT_FOUND', 'Job not found'));
+          }
+          if (clientId && job.clientId && clientId !== job.clientId) {
+            return json(404, errorBody('NOT_FOUND', 'Job not found'));
+          }
+
+          const result = await db.getJobResult(jobId);
+          if (!result) {
+            return json(404, errorBody('NOT_FOUND', 'OCR results not found'));
+          }
+
+          const q = (event as any).queryStringParameters || {};
+          const wantRaw = String(q.raw || '').toLowerCase() === 'true';
+          const maxBytes = (() => {
+            const v = Number(process.env['OCR_RETRIEVAL_MAX_BYTES']);
+            return Number.isFinite(v) && v > 0 ? v : 256 * 1024; // 256KB default
+          })();
+
+          const full = result.rawOcrText ?? '';
+          const buf = Buffer.from(full, 'utf8');
+          const truncated = !wantRaw && buf.byteLength > maxBytes;
+          const trimmed = truncated ? buf.subarray(0, maxBytes).toString('utf8') : full;
+
+          const body = {
+            job_id: job.id,
+            provider: result.ocrProvider ?? undefined,
+            duration_ms: result.ocrDurationMs ?? undefined,
+            pages: result.ocrPages ?? undefined,
+            raw_ocr_text: trimmed,
+            truncated
+          } as Record<string, unknown>;
+
+          log('info', 'OCR retrieval', { jobId: job.id, bytes: Buffer.byteLength(trimmed, 'utf8'), truncated });
           return json(200, body);
         }
 

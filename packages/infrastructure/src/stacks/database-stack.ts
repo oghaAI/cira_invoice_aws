@@ -109,6 +109,14 @@ export class DatabaseStack extends cdk.Stack {
       securityGroups: [this.vpcEndpointSecurityGroup]
     });
 
+    // VPC Interface Endpoint for Step Functions to allow API calls from isolated subnets
+    new ec2.InterfaceVpcEndpoint(this, 'StepFunctionsEndpoint', {
+      vpc: this.vpc as unknown as ec2.IVpc,
+      service: ec2.InterfaceVpcEndpointAwsService.STEP_FUNCTIONS,
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      securityGroups: [this.vpcEndpointSecurityGroup]
+    });
+
     // Create RDS Proxy for connection pooling
     this.databaseProxy = new rds.DatabaseProxy(this, 'DatabaseProxy', {
       proxyTarget: rds.ProxyTarget.fromInstance(this.database),

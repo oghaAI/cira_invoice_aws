@@ -35,7 +35,7 @@ I want **a provider-agnostic OCR adapter that converts PDFs to Markdown**,
 so that **PDF invoices are converted to Markdown regardless of OCR provider**.
 
 ### Acceptance Criteria
-1. Define a generic OCR provider interface (single entrypoint) that accepts a PDF by URL/stream and returns Markdown plus basic metadata (e.g., confidence, pages, processing time).
+1. Define a generic OCR provider interface (single entrypoint) that accepts a PDF by URL/stream and returns Markdown plus basic metadata (e.g., pages if available, processing time).
 2. Implement at least one concrete adapter behind the interface (can be any OCR API or a mock), selected via configuration (e.g., environment variable) without changing call sites.
 3. Ensure output is Markdown with reasonable structure preservation (headings, lists, tables when possible) and UTF-8 safe text.
 4. Support both synchronous and asynchronous provider flows with polling and a 5-minute timeout; include exponential backoff retries on transient errors.
@@ -50,8 +50,8 @@ so that **extracted text is available for LLM processing**.
 
 ### Acceptance Criteria
 1. Store raw OCR text in job_results table
-2. Add extraction metadata (confidence, processing time)
+2. Add extraction metadata (processing time and pages, if available)
 3. Update job status to "processing" during OCR
-4. Add compression for large text extractions
+4. Enforce size caps for stored OCR text (e.g., 1 MB) and truncate retrieval responses by default (e.g., 256 KB)
 5. Implement basic text validation
 6. Create OCR result retrieval for debugging

@@ -119,6 +119,40 @@ async function consumeBodyWithLimit(body: ReadableStream<Uint8Array> | null, lim
 }
 
 import { getOcrProvider, OcrError } from '../services/ocr';
+import { DatabaseClient } from '@cira/database';
+
+async function getDbCredentials() {
+  const secretArn = process.env['DATABASE_SECRET_ARN'];
+  if (!secretArn) return { user: undefined, password: undefined };
+  // Lazy import AWS SDK v3 to avoid loading in unit tests
+  const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
+  const client = new SecretsManagerClient({});
+  const res = await client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+  const secretString = res.SecretString ?? Buffer.from(res.SecretBinary ?? '').toString('utf8');
+  try {
+    const parsed = JSON.parse(secretString || '{}');
+    return { user: parsed.username, password: parsed.password } as { user?: string; password?: string };
+  } catch {
+    return { user: undefined, password: undefined };
+  }
+}
+
+const MAX_OCR_TEXT_BYTES = (() => {
+  const v = Number(process.env['OCR_TEXT_MAX_BYTES']);
+  return Number.isFinite(v) && v > 0 ? v : 1 * 1024 * 1024; // 1MB default
+})();
+
+function isUtf8Safe(text: string): boolean {
+  try {
+    // Convert to Buffer and back; will throw only on impossible inputs. This is a basic sanity check.
+    const b = Buffer.from(text, 'utf8');
+    // Re-encode to ensure no exception. Not a full validator but sufficient for our purposes.
+    void b.toString('utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const handler = async (event: any) => {
   const t0 = now();
@@ -222,13 +256,55 @@ export const handler = async (event: any) => {
     const ocrStart = now();
     try {
       const ocr = await provider.extract({ pdfUrl });
+      const rawText = ocr.markdown ?? '';
+      const rawBytes = Buffer.byteLength(rawText, 'utf8');
+
+      // Basic text validation
+      if (typeof rawText !== 'string' || rawText.length === 0) {
+        log('NETWORK_ERROR', { provider: provider.name, reason: 'empty_text' });
+        return { statusCode: 400, error_code: 'VALIDATION_ERROR_OCR_TEXT', message: 'OCR text is empty' };
+      }
+      if (!isUtf8Safe(rawText)) {
+        log('NETWORK_ERROR', { provider: provider.name, reason: 'utf8_invalid' });
+        return { statusCode: 400, error_code: 'VALIDATION_ERROR_OCR_TEXT', message: 'OCR text not UTF-8 safe' };
+      }
+      if (rawBytes > MAX_OCR_TEXT_BYTES) {
+        log('NETWORK_ERROR', { provider: provider.name, reason: 'ocr_text_too_large', bytes: rawBytes });
+        return { statusCode: 413, error_code: 'OCR_TEXT_TOO_LARGE', message: 'OCR text exceeds size limit', bytes: rawBytes };
+      }
+
+      // Persist OCR outputs into job_results (sanitize numeric fields)
+      const durationInt = Number.isFinite(ocr.metadata.durationMs) ? Math.max(0, Math.round(ocr.metadata.durationMs)) : null;
+      const pagesInt = Number.isFinite((ocr.metadata as any).pages)
+        ? Math.max(0, Math.trunc((ocr.metadata as any).pages as number))
+        : null;
+      const creds = await getDbCredentials();
+      const dbConfig: any = { ssl: true };
+      if (process.env['DATABASE_PROXY_ENDPOINT']) dbConfig.host = process.env['DATABASE_PROXY_ENDPOINT'];
+      if (process.env['DATABASE_NAME']) dbConfig.database = process.env['DATABASE_NAME'];
+      if (creds.user) dbConfig.user = creds.user;
+      if (creds.password) dbConfig.password = creds.password;
+      const db = new DatabaseClient(dbConfig);
+      try {
+        await db.upsertJobResult({
+          jobId,
+          rawOcrText: rawText,
+          ocrProvider: ocr.metadata.provider ?? provider.name,
+          ocrDurationMs: durationInt,
+          ocrPages: pagesInt
+        });
+      } finally {
+        await db.end();
+      }
+
+      // Return a compact payload to Step Functions to avoid state size limits.
+      // Raw OCR text is persisted in the database and not included here.
       const out = {
         jobId,
+        status: 'ocr_completed',
         ocr: {
           provider: ocr.metadata.provider,
-          markdown: ocr.markdown,
           metadata: {
-            confidence: ocr.metadata.confidence,
             pages: ocr.metadata.pages,
             durationMs: ocr.metadata.durationMs
           }

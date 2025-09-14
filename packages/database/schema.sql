@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS job_results (
     extracted_data JSONB, -- Flexible JSON storage
     confidence_score DECIMAL(3,2), -- 0.00 to 1.00
     tokens_used INTEGER,
+    raw_ocr_text TEXT, -- Raw OCR Markdown output (nullable)
+    ocr_provider VARCHAR(64), -- OCR provider identifier (nullable)
+    ocr_duration_ms INTEGER, -- OCR duration in milliseconds (nullable)
+    ocr_pages INTEGER, -- Number of pages processed, if available (nullable)
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -69,4 +73,3 @@ DO $$ BEGIN
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
-

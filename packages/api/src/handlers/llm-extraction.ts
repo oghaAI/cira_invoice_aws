@@ -3,7 +3,9 @@ export const handler = async (event: any) => {
 
   try {
     // Get OCR results from previous step
-    const { jobId, status } = event;
+    const { jobId } = event;
+    // Accept status either at root (legacy) or nested under ocr (current workflow)
+    const status: string | undefined = event?.status ?? event?.ocr?.status;
 
     if (!jobId) throw new Error('Missing jobId');
     if (status !== 'ocr_completed') {

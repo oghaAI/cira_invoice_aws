@@ -86,12 +86,30 @@ export function mistralProvider(): OcrProvider {
         } as const;
         const { data, requestId } = await http<any>(syncPathEnv, { method: 'POST', body: JSON.stringify(payload) });
         const durationMs = Date.now() - start;
-        const markdown = extractMarkdownFromResponse(data);
+
+        // Build a single markdown body from pages[] when present, otherwise fallback
+        let markdown = '';
+        if (Array.isArray((data as any)?.pages) && (data as any).pages.length > 0) {
+          const sorted = [...(data as any).pages].sort((a: any, b: any) => (a?.index ?? 0) - (b?.index ?? 0));
+          const parts = sorted.map((p: any) => (typeof p?.markdown === 'string' ? p.markdown : '')).filter(Boolean);
+          markdown = parts.join('\n\n---\n\n');
+        } else {
+          markdown = extractMarkdownFromResponse(data);
+        }
+
+        // Optionally strip image-only lines to keep size lean
+        if (process.env['OCR_STRIP_IMAGE_LINKS'] === '1') {
+          markdown = markdown.replace(/^!\[[^\]]*]\([^)]+\)\s*$/gm, '');
+        }
+
         const metadata: OcrMetadata = { provider: name, durationMs };
+        const pages = (data as any)?.usage_info?.pages_processed ?? (Array.isArray((data as any)?.pages) ? (data as any).pages.length : undefined);
+        if (pages !== undefined) metadata.pages = Number(pages);
         if ((data as any)?.confidence !== undefined) metadata.confidence = Number((data as any).confidence);
-        if ((data as any)?.pages !== undefined) metadata.pages = Number((data as any).pages);
         if (requestId) metadata.requestId = requestId;
-        log({ provider: name, requestId, durationMs, attempt: 0 });
+        if ((data as any)?.usage_info?.doc_size_bytes !== undefined) metadata.bytes = Number((data as any).usage_info.doc_size_bytes);
+
+        log({ provider: name, requestId, durationMs, pages: metadata.pages, attempt: 0 });
         return { markdown, metadata };
       }
 

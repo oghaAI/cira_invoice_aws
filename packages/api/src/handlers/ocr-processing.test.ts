@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handler } from './ocr-processing';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 
 // Mock OCR provider to isolate handler from real provider/network/env
 const mockExtract = vi.fn(async () => ({
@@ -12,6 +11,24 @@ vi.mock('../services/ocr', () => {
     getOcrProvider: () => ({ name: 'mock', extract: mockExtract }),
     OcrError: class OcrError extends Error { constructor(msg: string) { super(msg); this.name = 'OcrError'; } }
   };
+});
+
+// Mock database client to avoid real connections
+const upsertSpy = vi.fn(async () => ({}));
+vi.mock('@cira/database', () => {
+  return {
+    DatabaseClient: vi.fn().mockImplementation(() => ({
+      upsertJobResult: upsertSpy,
+      end: vi.fn(async () => {})
+    }))
+  };
+});
+
+let handler: any;
+beforeAll(async () => {
+  // Ensure no Secrets Manager access during tests
+  delete process.env.DATABASE_SECRET_ARN;
+  ({ handler } = await import('./ocr-processing'));
 });
 
 // Use Node18+/20 web fetch/Response/ReadableStream globals
@@ -81,6 +98,11 @@ describe('ocr-processing validation', () => {
     expect((res as any).ocr.markdown).toContain('# Invoice');
     // Provider should have been invoked once
     expect(mockExtract).toHaveBeenCalledTimes(1);
+    // Should persist OCR result
+    expect(upsertSpy).toHaveBeenCalledTimes(1);
+    expect(upsertSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 'j-ok', rawOcrText: expect.any(String), ocrProvider: 'mock', ocrDurationMs: expect.any(Number) })
+    );
   });
 
   it('accepts .pdf extension when content-type is inconclusive and runs OCR', async () => {
@@ -149,5 +171,16 @@ describe('ocr-processing validation', () => {
     const res = await handler({ jobId: 'j-overflow', pdfUrl: 'https://files.example.com/stream.pdf' });
     expect('error_code' in res ? res.error_code : null).toBe('PDF_TOO_LARGE');
     expect('statusCode' in res ? res.statusCode : null).toBe(413);
+  });
+
+  it('rejects empty OCR text before persistence', async () => {
+    mockExtract.mockResolvedValueOnce({ markdown: '', metadata: { provider: 'mock', durationMs: 1 } });
+    // @ts-ignore
+    (global.fetch as any).mockResolvedValue(
+      mkResponse(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'application/pdf', 'content-length': '3' } })
+    );
+    const res = await handler({ jobId: 'j-empty', pdfUrl: 'https://files.example.com/doc.pdf' });
+    expect('error_code' in res ? res.error_code : null).toBe('VALIDATION_ERROR_OCR_TEXT');
+    expect(upsertSpy).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,8 @@
+{
+    "OCR_PROVIDER": "mistral",
+    "DATABASE_NAME": "cira_invoice",
+    "DATABASE_PROXY_ENDPOINT": "cirainvoicedatabasedevdatabaseproxyf450cbf1.proxy-c27kmcguo8vq.us-east-1.rds.amazonaws.com",
+    "DATABASE_SECRET_ARN": "arn:aws:secretsmanager:us-east-1:141061059614:secret:dev/rds/credentials-u07UO7",
+    "MISTRAL_OCR_API_URL": "https://api.mistral.ai/v1/ocr",
+    "MISTRAL_API_KEY": "10ViO9DK18zaNsXKoSfBVfsQsvIs8pAq"
+}

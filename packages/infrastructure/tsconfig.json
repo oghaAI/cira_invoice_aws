@@ -1,13 +1,14 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "composite": true,
     "target": "ES2020",
     "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "./dist",
     "rootDir": "./src",
     "baseUrl": "./src",
-    "incremental": false,
+    "incremental": true,
     "paths": {
       "@cira/shared": ["../shared/src"]
     }

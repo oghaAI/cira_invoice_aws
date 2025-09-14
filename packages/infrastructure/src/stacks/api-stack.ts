@@ -50,6 +50,18 @@ export class ApiStack extends cdk.Stack {
     // Grant Lambda access to RDS secrets
     props.databaseStack.database.secret!.grantRead(lambdaRole);
 
+    // Allow Job Management Lambda to start Step Functions executions without
+    // creating a cross-stack reference to the specific State Machine ARN.
+    // Scoped to current account/region state machines.
+    const region = cdk.Stack.of(this).region;
+    const account = cdk.Stack.of(this).account;
+    lambdaRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['states:StartExecution'],
+        resources: [`arn:aws:states:${region}:${account}:stateMachine:*`]
+      })
+    );
+
     // Job Management Lambda Function
     this.jobManagementFunction = new lambdaNodejs.NodejsFunction(this, 'JobManagementFunction', {
       runtime: lambda.Runtime.NODEJS_20_X,
@@ -79,7 +91,10 @@ export class ApiStack extends cdk.Stack {
         ...lambdaEnvironment,
         OCR_PROVIDER: process.env['OCR_PROVIDER'] ?? 'mistral',
         MISTRAL_OCR_API_URL: process.env['MISTRAL_OCR_API_URL'] ?? '',
-        MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'] ?? ''
+        MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'] ?? '',
+        ALLOWED_PDF_HOSTS: process.env['ALLOWED_PDF_HOSTS'] ?? 'api.ciranet.com',
+        OCR_TEXT_MAX_BYTES: process.env['OCR_TEXT_MAX_BYTES'] ?? '1048576',
+        OCR_RETRIEVAL_MAX_BYTES: process.env['OCR_RETRIEVAL_MAX_BYTES'] ?? '262144'
       },
       vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
       vpcSubnets: {
@@ -189,11 +204,12 @@ export class ApiStack extends cdk.Stack {
     const jobsResource = this.api.root.addResource('jobs');
     const jobByIdResource = jobsResource.addResource('{jobId}');
     const jobStatusResource = jobByIdResource.addResource('status');
-    
+    const jobOcrResource = jobByIdResource.addResource('ocr');
 
     jobsResource.addMethod('POST', lambdaIntegration, { apiKeyRequired: true });
     jobByIdResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
     jobStatusResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
+    jobOcrResource.addMethod('GET', lambdaIntegration, { apiKeyRequired: true });
 
     // Outputs
     new cdk.CfnOutput(this, 'ApiEndpoint', {

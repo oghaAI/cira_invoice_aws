@@ -13,10 +13,10 @@
     "lint": "eslint --config ../../eslint.config.js src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
     "clean": "rm -rf dist",
-    "deploy": "npm run build:app && cdk deploy",
-    "deploy:dev": "npm run build:app && cdk deploy --context environment=dev",
-    "deploy:staging": "npm run build:app && cdk deploy --context environment=staging",
-    "deploy:prod": "npm run build:app && cdk deploy --context environment=prod",
+    "deploy": "npm run build:app && cdk deploy --all",
+    "deploy:dev": "npm run build:app && cdk deploy --all --context environment=dev",
+    "deploy:staging": "npm run build:app && cdk deploy --all --context environment=staging",
+    "deploy:prod": "npm run build:app && cdk deploy --all --context environment=prod",
     "migrate:dev": "bash -c \"ARN=$(aws cloudformation describe-stacks --stack-name CiraInvoice-Api-dev --region us-east-1 --query \\\"Stacks[0].Outputs[?OutputKey=='DbMigrateFunctionArn'].OutputValue\\\" --output text) && aws lambda invoke --function-name \\\"$ARN\\\" /tmp/out.json --log-type Tail --query LogResult --output text | base64 --decode\"",
     "synth": "cdk synth",
     "diff": "cdk diff",
@@ -40,4 +40,3 @@
     "iac"
   ]
 }
-

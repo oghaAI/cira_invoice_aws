@@ -28,6 +28,19 @@ CREATE TABLE IF NOT EXISTS job_results (
     tokens_used INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
+-- Ensure OCR-related columns exist on job_results
+DO $$ BEGIN
+    ALTER TABLE job_results ADD COLUMN IF NOT EXISTS raw_ocr_text TEXT;
+EXCEPTION WHEN undefined_column THEN null; END $$;
+DO $$ BEGIN
+    ALTER TABLE job_results ADD COLUMN IF NOT EXISTS ocr_provider VARCHAR(64);
+EXCEPTION WHEN undefined_column THEN null; END $$;
+DO $$ BEGIN
+    ALTER TABLE job_results ADD COLUMN IF NOT EXISTS ocr_duration_ms INTEGER;
+EXCEPTION WHEN undefined_column THEN null; END $$;
+DO $$ BEGIN
+    ALTER TABLE job_results ADD COLUMN IF NOT EXISTS ocr_pages INTEGER;
+EXCEPTION WHEN undefined_column THEN null; END $$;
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_client_id ON jobs(client_id);
