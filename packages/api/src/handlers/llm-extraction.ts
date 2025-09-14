@@ -7,7 +7,7 @@ function now() { return Date.now(); }
 export const handler = async (event: any) => {
   const t0 = now();
   const jobId = event?.jobId ?? null;
-  const status: string | undefined = event?.status ?? event?.ocr?.status;
+  const ocr = event?.ocr;
 
   const log = (fields: Record<string, unknown>) => {
     const base = { timestamp: new Date().toISOString(), jobId, durationMs: now() - t0, ...fields };
@@ -15,21 +15,21 @@ export const handler = async (event: any) => {
   };
 
   try {
+    // Validate input contains { jobId, ocr: { metadata } }
     if (!jobId) {
       log({ decision: 'VALIDATION', reason: 'missing_jobId' });
-      return { statusCode: 400, error_code: 'VALIDATION', message: 'Missing jobId' };
+      throw new Error('Missing jobId');
     }
-    if (status !== 'ocr_completed') {
-      log({ decision: 'VALIDATION', reason: 'ocr_not_completed' });
-      return { statusCode: 400, error_code: 'VALIDATION', message: 'OCR not completed' };
+    if (!ocr?.metadata) {
+      log({ decision: 'VALIDATION', reason: 'missing_ocr_metadata' });
+      throw new Error('OCR metadata missing');
     }
 
-    // Load database configuration
-    const dbConfig: any = {};
+    // Load database configuration (matching OCR handler pattern)
+    const dbConfig: any = { ssl: true };
     const creds: any = {};
-    if (process.env['DB_HOST']) dbConfig.host = process.env['DB_HOST'];
-    if (process.env['DB_PORT']) dbConfig.port = parseInt(process.env['DB_PORT'], 10);
-    if (process.env['DB_NAME']) dbConfig.database = process.env['DB_NAME'];
+    if (process.env['DATABASE_PROXY_ENDPOINT']) dbConfig.host = process.env['DATABASE_PROXY_ENDPOINT'];
+    if (process.env['DATABASE_NAME']) dbConfig.database = process.env['DATABASE_NAME'];
     if (process.env['DB_USER']) creds.user = process.env['DB_USER'];
     if (process.env['DB_PASSWORD']) creds.password = process.env['DB_PASSWORD'];
     if (creds.user) dbConfig.user = creds.user;
@@ -37,38 +37,58 @@ export const handler = async (event: any) => {
 
     const db = new DatabaseClient(dbConfig);
 
-    // Load OCR text from prior step
-    const jobResult = await db.getJobResult(jobId);
-    if (!jobResult || !jobResult.rawOcrText) {
-      log({ decision: 'VALIDATION', reason: 'no_ocr_text' });
-      return { statusCode: 400, error_code: 'VALIDATION', message: 'No OCR text available' };
+    try {
+      // Load OCR text from database (stored by OCR processing step)
+      const jobResult = await db.getJobResult(jobId);
+      if (!jobResult || !jobResult.rawOcrText) {
+        log({ decision: 'VALIDATION', reason: 'no_ocr_text' });
+        throw new Error('No OCR text available');
+      }
+
+      // Invoke AI SDK client with InvoiceExtractionSchema
+      const extractionResult = await extractStructured(InvoiceSchema, {
+        markdown: jobResult.rawOcrText
+      });
+
+      // Validate extraction result (required fields present)
+      if (!extractionResult.data) {
+        log({ decision: 'VALIDATION', reason: 'no_extracted_data' });
+        throw new Error('Extraction produced no data');
+      }
+
+      // On success: persist result with DatabaseClient.upsertJobResult
+      await db.upsertJobResult({
+        jobId,
+        extractedData: extractionResult.data,
+        confidence: extractionResult.confidence ?? null,
+        tokensUsed: extractionResult.tokensUsed ?? null
+      });
+
+      const tokens = extractionResult.tokensUsed ?? null;
+      const confidence = extractionResult.confidence ?? null;
+      log({ decision: 'OK', tokens, confidence });
+
+      // Return { jobId, status: 'llm_completed', extractedData, confidence, tokensUsed }
+      return {
+        jobId,
+        status: 'llm_completed',
+        result: {
+          extractedData: extractionResult.data,
+          confidence,
+          tokensUsed: tokens
+        },
+        metadata: {
+          processingTime: now() - t0,
+          ocrLength: jobResult.rawOcrText.length
+        }
+      };
+    } finally {
+      await db.end();
     }
-
-    // Extract structured data using the invoice schema
-    const extractionResult = await extractStructured(InvoiceSchema, {
-      markdown: jobResult.rawOcrText
-    });
-
-    // Persist extracted data and tokens used
-    await db.upsertJobResult({
-      jobId,
-      extractedData: extractionResult.data,
-      tokensUsed: extractionResult.tokensUsed ?? null
-    });
-
-    const tokens = extractionResult.tokensUsed ?? null;
-    log({ decision: 'OK', tokens, confidence: extractionResult.confidence });
-
-    // Return object for Step Functions
-    return {
-      jobId,
-      status: 'llm_completed',
-      extractedData: extractionResult.data,
-      tokensUsed: tokens
-    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log({ decision: 'UNHANDLED', message });
-    return { statusCode: 502, error_code: 'SERVER', message: 'LLM extraction error' };
+    log({ decision: 'ERROR', message });
+    // On failure: throw typed error for Step Functions catch
+    throw new Error(`LLM_EXTRACTION_ERROR: ${message}`);
   }
 };

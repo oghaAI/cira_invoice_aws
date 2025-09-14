@@ -5,11 +5,13 @@ import { __setAiFns, __resetAiFns } from '../services/llm/client';
 // Mock DatabaseClient
 const mockGetJobResult = vi.fn();
 const mockUpsertJobResult = vi.fn();
+const mockEnd = vi.fn();
 
 vi.mock('@cira/database', () => ({
   DatabaseClient: vi.fn().mockImplementation(() => ({
     getJobResult: mockGetJobResult,
-    upsertJobResult: mockUpsertJobResult
+    upsertJobResult: mockUpsertJobResult,
+    end: mockEnd
   }))
 }));
 
@@ -19,12 +21,13 @@ describe('llm-extraction handler', () => {
     vi.stubEnv('AZURE_OPENAI_ENDPOINT', 'https://test.openai.azure.com');
     vi.stubEnv('AZURE_OPENAI_API_KEY', 'test-key');
     vi.stubEnv('AZURE_OPENAI_DEPLOYMENT', 'test-deployment');
-    vi.stubEnv('DB_HOST', 'test-host');
-    vi.stubEnv('DB_NAME', 'test-db');
+    vi.stubEnv('DATABASE_PROXY_ENDPOINT', 'test-host');
+    vi.stubEnv('DATABASE_NAME', 'test-db');
 
     // Reset mocks
     mockGetJobResult.mockReset();
     mockUpsertJobResult.mockReset();
+    mockEnd.mockReset();
 
     // Mock AI SDK functions for successful extraction
     __setAiFns({
@@ -69,15 +72,20 @@ describe('llm-extraction handler', () => {
   it('should successfully extract structured data and persist to database', async () => {
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: {
+        metadata: {
+          pages: 2,
+          durationMs: 5000
+        }
+      }
     };
 
     const result = await handler(event);
 
     expect(result.status).toBe('llm_completed');
     expect(result.jobId).toBe('test-job-123');
-    expect(result.extractedData).toBeDefined();
-    expect(result.tokensUsed).toBe(1500);
+    expect(result.result.extractedData).toBeDefined();
+    expect(result.result.tokensUsed).toBe(1500);
 
     // Verify database calls
     expect(mockGetJobResult).toHaveBeenCalledWith('test-job-123');
@@ -93,82 +101,68 @@ describe('llm-extraction handler', () => {
           confidence: 'medium'
         })
       }),
+      confidence: expect.any(Number), // extractStructured calculates confidence
       tokensUsed: 1500
     });
   });
 
-  it('should return validation error for missing jobId', async () => {
-    const event = { status: 'ocr_completed' };
-
-    const result = await handler(event);
-
-    expect(result.statusCode).toBe(400);
-    expect(result.error_code).toBe('VALIDATION');
-    expect(result.message).toBe('Missing jobId');
-  });
-
-  it('should return validation error when OCR not completed', async () => {
+  it('should throw error for missing jobId', async () => {
     const event = {
-      jobId: 'test-job-123',
-      status: 'processing'
+      ocr: { metadata: { pages: 1 } }
     };
 
-    const result = await handler(event);
-
-    expect(result.statusCode).toBe(400);
-    expect(result.error_code).toBe('VALIDATION');
-    expect(result.message).toBe('OCR not completed');
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: Missing jobId');
   });
 
-  it('should return validation error when no OCR text available', async () => {
+  it('should throw error when OCR metadata missing', async () => {
+    const event = {
+      jobId: 'test-job-123'
+    };
+
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: OCR metadata missing');
+  });
+
+  it('should throw error when no OCR text available', async () => {
     mockGetJobResult.mockResolvedValue(null);
 
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
-    const result = await handler(event);
-
-    expect(result.statusCode).toBe(400);
-    expect(result.error_code).toBe('VALIDATION');
-    expect(result.message).toBe('No OCR text available');
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: No OCR text available');
   });
 
-  it('should return validation error when OCR text is empty', async () => {
+  it('should throw error when OCR text is empty', async () => {
     mockGetJobResult.mockResolvedValue({ rawOcrText: null });
 
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
-    const result = await handler(event);
-
-    expect(result.statusCode).toBe(400);
-    expect(result.error_code).toBe('VALIDATION');
-    expect(result.message).toBe('No OCR text available');
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: No OCR text available');
   });
 
   it('should handle field_reasoning and field_confidence correctly', async () => {
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
     const result = await handler(event);
 
-    expect(result.extractedData).toBeDefined();
-    expect(result.extractedData.invoice_date?.reasoning).toBe('Found in header section');
-    expect(result.extractedData.invoice_date?.confidence).toBe('high');
-    expect(result.extractedData.vendor_name?.reasoning).toBe('Not present in document');
-    expect(result.extractedData.vendor_name?.confidence).toBe('low');
+    expect(result.result.extractedData).toBeDefined();
+    expect(result.result.extractedData.invoice_date?.reasoning).toBe('Found in header section');
+    expect(result.result.extractedData.invoice_date?.confidence).toBe('high');
+    expect(result.result.extractedData.vendor_name?.reasoning).toBe('Not present in document');
+    expect(result.result.extractedData.vendor_name?.confidence).toBe('low');
   });
 
   it('should persist JSONB including field_reasoning and field_confidence', async () => {
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
     await handler(event);
@@ -206,14 +200,14 @@ describe('llm-extraction handler', () => {
 
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
     const result = await handler(event);
 
-    expect(result.extractedData.invoice_date).toBeDefined();
-    expect(result.extractedData.vendor_name).toBeUndefined(); // Missing optional fields
-    expect(result.tokensUsed).toBe(800);
+    expect(result.result.extractedData.invoice_date).toBeDefined();
+    expect(result.result.extractedData.vendor_name).toBeUndefined(); // Missing optional fields
+    expect(result.result.tokensUsed).toBe(800);
   });
 
   it('should handle database errors gracefully', async () => {
@@ -221,14 +215,10 @@ describe('llm-extraction handler', () => {
 
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
-    const result = await handler(event);
-
-    expect(result.statusCode).toBe(502);
-    expect(result.error_code).toBe('SERVER');
-    expect(result.message).toBe('LLM extraction error');
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: Database connection failed');
   });
 
   it('should handle LLM extraction failures', async () => {
@@ -240,13 +230,71 @@ describe('llm-extraction handler', () => {
 
     const event = {
       jobId: 'test-job-123',
-      status: 'ocr_completed'
+      ocr: { metadata: { pages: 1 } }
     };
 
-    const result = await handler(event);
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: LLM API timeout');
+  });
 
-    expect(result.statusCode).toBe(502);
-    expect(result.error_code).toBe('SERVER');
-    expect(result.message).toBe('LLM extraction error');
+  // New test cases as per story requirements
+  it('should throw error when extraction produces no data', async () => {
+    __setAiFns({
+      generateObject: async () => ({
+        object: null, // No data produced
+        usage: { totalTokens: 500 },
+        reasoning: 'No reasoning',
+        finishReason: 'stop',
+        warnings: [],
+        request: {},
+        response: {},
+        rawResponse: {},
+        providerMetadata: {},
+        toJsonResponse: () => ({})
+      })
+    });
+
+    const event = {
+      jobId: 'test-job-123',
+      ocr: { metadata: { pages: 1 } }
+    };
+
+    await expect(handler(event)).rejects.toThrow('LLM_EXTRACTION_ERROR: Extraction produced no data');
+  });
+
+  it('should persist confidence score when available', async () => {
+    __setAiFns({
+      generateObject: async () => ({
+        object: {
+          invoice_date: {
+            value: '2024-01-15',
+            reasoning: 'Found in header',
+            confidence: 'high'
+          }
+        },
+        usage: { totalTokens: 800 },
+        reasoning: 'Generated object',
+        finishReason: 'stop',
+        warnings: [],
+        request: {},
+        response: {},
+        rawResponse: {},
+        providerMetadata: {},
+        toJsonResponse: () => ({})
+      })
+    });
+
+    const event = {
+      jobId: 'test-job-123',
+      ocr: { metadata: { pages: 1 } }
+    };
+
+    await handler(event); // Don't need result since it's unused
+
+    expect(mockUpsertJobResult).toHaveBeenCalledWith({
+      jobId: 'test-job-123',
+      extractedData: expect.any(Object),
+      confidence: expect.any(Number), // extractStructured calculates confidence
+      tokensUsed: 800
+    });
   });
 });
