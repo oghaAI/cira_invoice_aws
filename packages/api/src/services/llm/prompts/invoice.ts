@@ -1,6 +1,6 @@
-import type { CoreMessage } from '../client';
+import type { ChatMessage } from '../client';
 
-export function buildInvoiceExtractionPrompt(markdown: string): CoreMessage[] {
+export function buildInvoiceExtractionPrompt(markdown: string): ChatMessage[] {
   const system = `You are a precise invoice extraction assistant.
 - Only extract factual fields present in the input. Do not infer or hallucinate.
 - If a field is missing, set it to null or an empty list as appropriate.

@@ -1,0 +1,868 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "CIRA Invoice Processing API",
+    "description": "Invoice processing system that handles PDF document processing, OCR extraction, and LLM-based invoice data extraction.\n\n## Authentication\nThis API uses API key authentication via the `X-API-Key` header. All requests require a valid API key.\n\n## Workflow\n1. Submit a PDF URL for processing via `POST /jobs`\n2. Monitor processing status via `GET /jobs/{id}/status`\n3. Retrieve extracted results via `GET /jobs/{id}/result`\n4. Optionally retrieve OCR text via `GET /jobs/{id}/ocr`\n",
+    "version": "1.0.0",
+    "contact": {
+      "name": "CIRA API Support"
+    },
+    "license": {
+      "name": "Proprietary"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.example.com",
+      "description": "Production server"
+    },
+    {
+      "url": "https://dev-api.example.com",
+      "description": "Development server"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health check",
+        "description": "Returns system health status and version information",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "System is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "healthy",
+                  "version": "1.0.0",
+                  "timestamp": "2025-01-12T10:30:00Z",
+                  "database": "connected"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Create processing job",
+        "description": "Submit a PDF URL for invoice processing",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobRequest"
+              },
+              "example": {
+                "pdf_url": "https://example.com/invoice.pdf"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Job created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                },
+                "example": {
+                  "job_id": "123e4567-e89b-12d3-a456-426614174000",
+                  "status": "queued",
+                  "created_at": "2025-01-12T10:30:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missing_url": {
+                    "summary": "Missing PDF URL",
+                    "value": {
+                      "error_code": "VALIDATION_ERROR",
+                      "message": "pdf_url is required"
+                    }
+                  },
+                  "invalid_url": {
+                    "summary": "Invalid URL format",
+                    "value": {
+                      "error_code": "VALIDATION_ERROR",
+                      "message": "pdf_url must be a valid URL"
+                    }
+                  },
+                  "non_https": {
+                    "summary": "Non-HTTPS URL",
+                    "value": {
+                      "error_code": "VALIDATION_ERROR",
+                      "message": "pdf_url must use HTTPS"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get job details",
+        "description": "Retrieve complete job information including status and metadata",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job details retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetailsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}/status": {
+      "get": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Get job status",
+        "description": "Check the current processing status of a job",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                },
+                "examples": {
+                  "queued": {
+                    "summary": "Job in queue",
+                    "value": {
+                      "id": "123e4567-e89b-12d3-a456-426614174000",
+                      "status": "queued",
+                      "created_at": "2025-01-12T10:30:00Z",
+                      "updated_at": "2025-01-12T10:30:00Z"
+                    }
+                  },
+                  "processing": {
+                    "summary": "Job being processed",
+                    "value": {
+                      "id": "123e4567-e89b-12d3-a456-426614174000",
+                      "status": "processing",
+                      "phase": "analyzing_invoice",
+                      "phase_label": "Analyzing invoice",
+                      "created_at": "2025-01-12T10:30:00Z",
+                      "updated_at": "2025-01-12T10:31:00Z"
+                    }
+                  },
+                  "completed": {
+                    "summary": "Job completed",
+                    "value": {
+                      "id": "123e4567-e89b-12d3-a456-426614174000",
+                      "status": "completed",
+                      "created_at": "2025-01-12T10:30:00Z",
+                      "updated_at": "2025-01-12T10:35:00Z",
+                      "completed_at": "2025-01-12T10:35:00Z"
+                    }
+                  },
+                  "failed": {
+                    "summary": "Job failed",
+                    "value": {
+                      "id": "123e4567-e89b-12d3-a456-426614174000",
+                      "status": "failed",
+                      "created_at": "2025-01-12T10:30:00Z",
+                      "updated_at": "2025-01-12T10:32:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid job ID format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found or access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}/result": {
+      "get": {
+        "tags": [
+          "Results"
+        ],
+        "summary": "Get extraction results",
+        "description": "Retrieve extracted invoice data from completed job",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Results retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResultResponse"
+                },
+                "example": {
+                  "job_id": "123e4567-e89b-12d3-a456-426614174000",
+                  "extracted_data": {
+                    "invoice_date": {
+                      "value": "2025-01-12",
+                      "reasoning": "Found date at top of document",
+                      "confidence": "high"
+                    },
+                    "invoice_number": {
+                      "value": "INV-2025-001",
+                      "reasoning": "Invoice number clearly labeled",
+                      "confidence": "high"
+                    },
+                    "invoice_current_due_amount": {
+                      "value": 1250,
+                      "reasoning": "Amount due clearly stated",
+                      "confidence": "high"
+                    }
+                  },
+                  "confidence_score": 0.95,
+                  "tokens_used": 1250,
+                  "raw_ocr_markdown": "# Invoice\\n\\nDate: 01/12/2025..."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found, not completed, or results not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "not_found": {
+                    "summary": "Job not found",
+                    "value": {
+                      "error_code": "NOT_FOUND",
+                      "message": "Job not found"
+                    }
+                  },
+                  "not_completed": {
+                    "summary": "Job not completed",
+                    "value": {
+                      "error_code": "NOT_FOUND",
+                      "message": "Job not completed"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}/ocr": {
+      "get": {
+        "tags": [
+          "OCR"
+        ],
+        "summary": "Get OCR results",
+        "description": "Retrieve raw OCR text extracted from the PDF",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobIdPath"
+          },
+          {
+            "name": "raw",
+            "in": "query",
+            "description": "If true, returns full OCR text without truncation",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OCR results retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OCRResponse"
+                },
+                "example": {
+                  "job_id": "123e4567-e89b-12d3-a456-426614174000",
+                  "provider": "textract",
+                  "duration_ms": 5000,
+                  "pages": 1,
+                  "raw_ocr_text": "INVOICE\\nDate: 01/12/2025\\nInvoice #: INV-2025-001...",
+                  "truncated": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job not found or OCR results not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API key for authentication"
+      }
+    },
+    "parameters": {
+      "JobIdPath": {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "description": "Unique identifier for the job (UUID format)",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "example": "123e4567-e89b-12d3-a456-426614174000"
+      }
+    },
+    "schemas": {
+      "CreateJobRequest": {
+        "type": "object",
+        "required": [
+          "pdf_url"
+        ],
+        "properties": {
+          "pdf_url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https://",
+            "maxLength": 2048,
+            "description": "HTTPS URL to the PDF file to be processed",
+            "example": "https://example.com/invoices/invoice-001.pdf"
+          }
+        },
+        "additionalProperties": false
+      },
+      "JobResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the created job"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued"
+            ],
+            "description": "Initial status is always 'queued'"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when job was created"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "created_at"
+        ]
+      },
+      "JobDetailsResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "API key identifier"
+          },
+          "pdfUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "errorMessage": {
+            "type": "string",
+            "nullable": true,
+            "description": "Error message if job failed"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "JobStatusResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Job identifier"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "analyzing_invoice",
+              "extracting_data",
+              "verifying_data"
+            ],
+            "description": "Current processing phase (only present when status is 'processing')"
+          },
+          "phase_label": {
+            "type": "string",
+            "description": "Human-readable phase description"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job was created"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job was last updated"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the job was completed (only present if completed)"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "description": "Job processing status:\n- `queued`: Job is waiting to be processed\n- `processing`: Job is currently being processed\n- `completed`: Job completed successfully\n- `failed`: Job failed with an error\n"
+      },
+      "JobResultResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "extracted_data": {
+            "$ref": "#/components/schemas/InvoiceData"
+          },
+          "confidence_score": {
+            "type": "number",
+            "format": "float",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Overall confidence score for the extraction",
+            "nullable": true
+          },
+          "tokens_used": {
+            "type": "integer",
+            "description": "Number of tokens used for LLM processing",
+            "nullable": true
+          },
+          "raw_ocr_markdown": {
+            "type": "string",
+            "description": "Raw OCR output in markdown format",
+            "nullable": true
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      },
+      "InvoiceData": {
+        "type": "object",
+        "description": "Extracted invoice data with reasoning",
+        "properties": {
+          "invoice_date": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "invoice_number": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "invoice_due_date": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "policy_number": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "account_number": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "policy_start_date": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "policy_end_date": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "service_start_date": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "service_end_date": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "payment_remittance_address": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "payment_remittance_entity": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "payment_remittance_entity_care_of": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "community_name": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "vendor_name": {
+            "$ref": "#/components/schemas/ReasonedStringField"
+          },
+          "invoice_past_due_amount": {
+            "$ref": "#/components/schemas/ReasonedNumberField"
+          },
+          "invoice_current_due_amount": {
+            "$ref": "#/components/schemas/ReasonedNumberField"
+          },
+          "invoice_late_fee_amount": {
+            "$ref": "#/components/schemas/ReasonedNumberField"
+          },
+          "credit_amount": {
+            "$ref": "#/components/schemas/ReasonedNumberField"
+          },
+          "valid_input": {
+            "$ref": "#/components/schemas/ReasonedBooleanField"
+          }
+        }
+      },
+      "ReasonedStringField": {
+        "type": "object",
+        "description": "String field with AI reasoning",
+        "properties": {
+          "value": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "AI reasoning for the extracted value"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel"
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Any assumptions made during extraction"
+          }
+        },
+        "required": [
+          "reasoning",
+          "confidence"
+        ]
+      },
+      "ReasonedNumberField": {
+        "type": "object",
+        "description": "Number field with AI reasoning",
+        "properties": {
+          "value": {
+            "type": "number",
+            "nullable": true
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "AI reasoning for the extracted value"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel"
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Any assumptions made during extraction"
+          }
+        },
+        "required": [
+          "reasoning",
+          "confidence"
+        ]
+      },
+      "ReasonedBooleanField": {
+        "type": "object",
+        "description": "Boolean field with AI reasoning",
+        "properties": {
+          "value": {
+            "type": "boolean"
+          },
+          "reasoning": {
+            "type": "string",
+            "description": "AI reasoning for the extracted value"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel"
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Any assumptions made during extraction"
+          }
+        },
+        "required": [
+          "reasoning",
+          "confidence"
+        ]
+      },
+      "ConfidenceLevel": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "description": "Confidence level for the extracted value:\n- `low`: Uncertain about the extraction\n- `medium`: Reasonably confident\n- `high`: Very confident in the extraction\n"
+      },
+      "OCRResponse": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "description": "OCR provider used (e.g., \"textract\")"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "description": "OCR processing duration in milliseconds"
+          },
+          "pages": {
+            "type": "integer",
+            "description": "Number of pages processed"
+          },
+          "raw_ocr_text": {
+            "type": "string",
+            "description": "Raw OCR text output"
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the text was truncated due to size limits"
+          }
+        },
+        "required": [
+          "job_id",
+          "raw_ocr_text",
+          "truncated"
+        ]
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "down"
+            ],
+            "description": "Overall system health status"
+          },
+          "version": {
+            "type": "string",
+            "description": "API version"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Current server timestamp"
+          },
+          "database": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "disconnected"
+            ],
+            "description": "Database connectivity status"
+          }
+        },
+        "required": [
+          "status",
+          "version",
+          "timestamp",
+          "database"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string",
+            "description": "Machine-readable error code",
+            "enum": [
+              "VALIDATION_ERROR",
+              "NOT_FOUND",
+              "METHOD_NOT_ALLOWED",
+              "INTERNAL_SERVER_ERROR"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message"
+          }
+        },
+        "required": [
+          "error_code",
+          "message"
+        ],
+        "example": {
+          "error_code": "VALIDATION_ERROR",
+          "message": "pdf_url is required"
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "System",
+      "description": "System health and status endpoints"
+    },
+    {
+      "name": "Jobs",
+      "description": "Job management operations"
+    },
+    {
+      "name": "Results",
+      "description": "Processing results retrieval"
+    },
+    {
+      "name": "OCR",
+      "description": "OCR text retrieval"
+    }
+  ]
+}

@@ -1,17 +1,36 @@
 # CIRA Invoice Processing System
 
-> AWS-based serverless invoice processing system with OCR and LLM data extraction capabilities.
+> Enterprise-scale serverless invoice processing system with OCR and LLM data extraction capabilities.
 
 ## 🏗️ Architecture
 
-This is a **TypeScript monorepo** built with **AWS CDK** for Infrastructure as Code, featuring:
+This is a **TypeScript monorepo** built with **AWS CDK** for Infrastructure as Code, featuring a complete **3-stage processing pipeline**:
 
 - **API Gateway + Lambda** for RESTful API endpoints
-- **PostgreSQL RDS** for data persistence  
-- **Step Functions** for workflow orchestration
-- **Docling API** for OCR text extraction
-- **Azure OpenAI GPT-4** for structured data extraction
+- **PostgreSQL RDS** with Drizzle ORM for data persistence
+- **Step Functions** for workflow orchestration and retry logic
+- **Docling OCR API** for PDF text extraction
+- **Azure OpenAI GPT-4** with AI SDK for structured data extraction
+- **Comprehensive validation** with Zod schemas
 - **CloudWatch** for monitoring and logging
+
+## 🎯 Current Implementation Status
+
+**✅ Completed Features (Stories 1.1-3.3):**
+- Complete project setup with AWS CDK infrastructure
+- Database schema with job tracking and results storage
+- API endpoints for job creation and status checking
+- Step Functions workflow with retry and error handling
+- OCR processing with Docling integration
+- LLM extraction with Azure OpenAI and Zod validation
+- Comprehensive test coverage across all components
+
+**🔄 In Progress (Story 3.4):**
+- Results API endpoint (`GET /jobs/{id}/result`) - Ready for Review
+
+**📋 Planned Features:**
+- Basic cost tracking and reporting
+- Enhanced monitoring and alerting
 
 ## 📦 Project Structure
 
@@ -36,6 +55,9 @@ cira-invoice-aws/
 - **npm** >= 10.0.0
 - **AWS CLI** configured with appropriate permissions
 - **AWS CDK** >= 2.214.0
+- **PostgreSQL** for local development (or Docker)
+- **Azure OpenAI** API key for LLM processing
+- **Docling API** access for OCR processing
 
 ### Installation
 
@@ -80,10 +102,14 @@ npm run dev
 
 2. **Environment Variables**
    ```bash
-   # Copy example environment files
+   # Copy example environment files (if available)
    cp .env.example .env.local
-   
-   # Configure your environment-specific values
+
+   # Configure required environment variables:
+   # - AZURE_OPENAI_API_KEY
+   # - AZURE_OPENAI_ENDPOINT
+   # - DOCLING_API_KEY (if required)
+   # - DATABASE_URL (for local development)
    vim .env.local
    ```
 
@@ -210,20 +236,32 @@ npm run monitor:db
 
 ### API Package (`packages/api`)
 
-**Framework**: Hono 4.9.6 (serverless-optimized)
-**Purpose**: Lambda function handlers and middleware
+**Framework**: Hono (serverless-optimized) + AI SDK for Azure OpenAI
+**Purpose**: Lambda function handlers for job management, OCR processing, and LLM extraction
+
+**Key Components:**
+- Job Management API (`/jobs` endpoint)
+- OCR Processing Lambda (Docling integration)
+- LLM Extraction Lambda (Azure OpenAI + Zod validation)
+- Results API (`/jobs/{id}/result` endpoint)
 
 ```bash
 cd packages/api
 npm run dev        # Start development mode
 npm run build      # Compile TypeScript
-npm run test       # Run unit tests
+npm run test       # Run comprehensive test suite
 ```
 
 ### Database Package (`packages/database`)
 
 **ORM**: Drizzle ORM 0.44.x with PostgreSQL
-**Purpose**: Schema definitions, migrations, and queries
+**Purpose**: Schema definitions, migrations, and database client
+
+**Key Features:**
+- Job tracking with status management
+- OCR results storage (JSONB)
+- LLM extraction results with confidence scores
+- Token usage tracking for cost monitoring
 
 ```bash
 cd packages/database
@@ -235,7 +273,13 @@ npm run db:studio      # Open Drizzle Studio
 ### Infrastructure Package (`packages/infrastructure`)
 
 **Framework**: AWS CDK 2.214.0
-**Purpose**: Infrastructure as Code definitions
+**Purpose**: Complete serverless infrastructure deployment
+
+**Key Stacks:**
+- API Gateway with Lambda integration
+- Step Functions workflow orchestration
+- PostgreSQL RDS with auto-scaling
+- CloudWatch monitoring and logging
 
 ```bash
 cd packages/infrastructure
@@ -243,6 +287,14 @@ npm run synth          # Generate CloudFormation templates
 npm run diff           # Show infrastructure changes
 npm run deploy         # Deploy infrastructure
 ```
+
+### Shared Package (`packages/shared`)
+
+**Purpose**: Common utilities, types, and validation schemas
+
+### Step Functions Package (`packages/step-functions`)
+
+**Purpose**: Workflow definitions for invoice processing pipeline
 
 ## 🔐 Security
 
@@ -299,9 +351,35 @@ npx snyk test
 
 ## 📚 Documentation
 
-- **API Documentation**: `docs/api/` - OpenAPI specifications
-- **Architecture**: `docs/architecture/` - System design documents
-- **Deployment**: `docs/deployment/` - Environment setup guides
+- **API Documentation**: `docs/api-spec.yaml` - OpenAPI 3.0 specification
+- **Architecture**: `docs/architecture.md` - Complete system design document
+- **Stories**: `docs/stories/` - Detailed implementation stories (1.1-3.4)
+- **PRD**: `docs/prd-mvp.md` - Product requirements and MVP scope
+- **QA Reports**: `docs/qa/` - Quality assurance and testing documentation
+
+## 🔄 Processing Pipeline
+
+The system implements a **3-stage serverless processing pipeline**:
+
+### Stage 1: Job Creation
+- Client submits PDF URL via `POST /jobs`
+- System validates URL and creates job record
+- Returns job ID for tracking
+
+### Stage 2: OCR Processing
+- Step Functions triggers OCR Lambda
+- Docling API extracts text from PDF
+- Raw text stored in database with metadata
+
+### Stage 3: LLM Extraction
+- Azure OpenAI processes OCR text
+- Zod schema validates extracted data
+- Structured JSON stored with confidence scores
+
+### Results Retrieval
+- Client polls `GET /jobs/{id}` for status
+- Completed jobs accessible via `GET /jobs/{id}/result`
+- Returns structured invoice data with metadata
 
 ## 🛠️ Troubleshooting
 
@@ -349,5 +427,6 @@ This project is proprietary and confidential. Unauthorized copying, distribution
 
 ---
 
-**Maintained by**: CIRA Development Team  
-**Last Updated**: 2024-01-15
+**Maintained by**: CIRA Development Team
+**Last Updated**: 2025-09-15
+**Implementation Status**: MVP features completed (Stories 1.1-3.3), Story 3.4 ready for review

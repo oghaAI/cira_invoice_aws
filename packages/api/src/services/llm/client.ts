@@ -250,7 +250,7 @@ export async function extractStructured<T>(
   input: { markdown: string },
   options?: ExtractStructuredOptions
 ): Promise<ExtractStructuredResult<T>> {
-  const prompt = `Extract structured data from the following invoice document. Return only fields in the schema, plus reasoning (1–2 sentences for every field, including when null) and confidence (one of: low, medium, high) for every field. For null fields, explain why and set confidence accordingly. Do not return decimals.
+  const prompt = `Extract structured data from the following invoice document. Return only fields in the schema, plus reasoning (1–2 sentences for every field, including when null) and confidence (one of: low, medium, high) for every field. For null fields, explain why and set confidence accordingly.
 
 Document content:
 ${input.markdown}`;

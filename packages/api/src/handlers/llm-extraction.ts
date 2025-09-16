@@ -2,7 +2,9 @@ import { extractStructured } from '../services/llm/client';
 import { InvoiceSchema } from '../services/llm/schemas/invoice';
 import { DatabaseClient } from '@cira/database';
 
-function now() { return Date.now(); }
+function now() {
+  return Date.now();
+}
 
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
@@ -84,7 +86,7 @@ export const handler = async (event: any) => {
       await db.upsertJobResult({
         jobId,
         extractedData: extractionResult.data,
-        confidence: extractionResult.confidence ?? null,
+        confidenceScore: extractionResult.confidence ?? null,
         tokensUsed: extractionResult.tokensUsed ?? null
       });
 

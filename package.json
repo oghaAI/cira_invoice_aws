@@ -18,7 +18,10 @@
     "test:all": "./scripts/run-tests.sh",
     "bmad:refresh": "bmad-method install -f -i codex",
     "bmad:list": "bmad-method list:agents",
-    "bmad:validate": "bmad-method validate"
+    "bmad:validate": "bmad-method validate",
+    "docs:generate": "node docs/generate-docs.js",
+    "docs:serve": "serve docs/ -l 3001",
+    "docs:dev": "npm run docs:generate && npm run docs:serve"
   },
   "keywords": [
     "invoice",
@@ -35,11 +38,14 @@
     "npm": ">=10.0.0"
   },
   "devDependencies": {
+    "@scalar/api-reference": "^1.35.5",
     "@typescript-eslint/eslint-plugin": "^8.43.0",
     "@typescript-eslint/parser": "^8.43.0",
     "dotenv": "^17.2.2",
     "eslint": "^9.35.0",
+    "js-yaml": "^4.1.0",
     "prettier": "^3.6.2",
+    "serve": "^14.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
