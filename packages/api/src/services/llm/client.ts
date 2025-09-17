@@ -1,14 +1,55 @@
+/**
+ * @fileoverview LLM Client Service
+ *
+ * This module provides a comprehensive client interface for Azure OpenAI integration
+ * using the AI SDK v5. It handles structured data extraction with retry logic,
+ * error categorization, and confidence scoring for the CIRA Invoice Processing System.
+ *
+ * Key Features:
+ * - Azure OpenAI integration via AI SDK v5 createAzure provider
+ * - Structured object generation with Zod schema validation
+ * - Comprehensive error handling with categorized error types
+ * - Automatic retry logic with exponential backoff and jitter
+ * - Token usage tracking for cost monitoring
+ * - Weighted confidence calculation for extraction quality
+ * - Type-safe configuration management
+ *
+ * Architecture:
+ * - Factory pattern for LLM client configuration
+ * - Error mapping and categorization for different failure modes
+ * - Flexible timeout and retry configuration
+ * - Normalization and validation of extracted data
+ * - Test seams for unit testing without external dependencies
+ *
+ * @version 1.0.0
+ * @author CIRA Development Team
+ * @since 2025-09-15
+ */
+
 import { z } from 'zod';
 import { createAzure } from '@ai-sdk/azure';
 import { generateObject } from 'ai';
 
+/**
+ * Categories of LLM errors for proper error handling and retry logic.
+ * Each category maps to specific HTTP status codes and retry strategies.
+ */
 export type LlmErrorCategory = 'VALIDATION' | 'AUTH' | 'QUOTA' | 'TIMEOUT' | 'SERVER' | 'FAILED_STATUS';
 
+/**
+ * Custom error class for LLM-related operations with detailed categorization.
+ * Provides structured error information for debugging and monitoring.
+ */
 export class LlmError extends Error {
+  /** Error category for retry and handling logic */
   category: LlmErrorCategory;
+  /** HTTP status code if applicable */
   statusCode?: number;
+  /** LLM provider identifier */
   provider?: string;
+  /** Request ID for tracing */
   requestId?: string | null;
+  /** Original error message from underlying cause */
   causeMessage?: string;
 
   constructor(options: {
@@ -40,13 +81,33 @@ export class LlmError extends Error {
   }
 }
 
+/**
+ * Configuration interface for Azure OpenAI LLM client.
+ * Contains all necessary parameters for Azure OpenAI API authentication and routing.
+ */
 export interface LlmClientConfig {
-  resourceName: string; // e.g., cira-invoice-data-extraction
+  /** Azure OpenAI resource name (e.g., cira-invoice-data-extraction) */
+  resourceName: string;
+  /** Azure OpenAI API key for authentication */
   apiKey: string;
-  deployment: string; // Azure deployment name (acts as model ID)
+  /** Azure deployment name (acts as model ID for API calls) */
+  deployment: string;
+  /** Azure OpenAI API version (e.g., 2024-12-01-preview) */
   apiVersion: string;
 }
 
+/**
+ * Safely retrieves a required environment variable with validation.
+ *
+ * @param {string} name - Environment variable name
+ * @returns {string} Trimmed environment variable value
+ * @throws {LlmError} If environment variable is missing or empty
+ *
+ * @example
+ * ```typescript
+ * const apiKey = getRequiredEnv('AZURE_OPENAI_API_KEY');
+ * ```
+ */
 export function getRequiredEnv(name: string): string {
   const v = process.env[name];
   if (!v || v.trim().length === 0) {
@@ -55,6 +116,22 @@ export function getRequiredEnv(name: string): string {
   return v.trim();
 }
 
+/**
+ * Factory function to create LLM client configuration from environment variables.
+ *
+ * Reads Azure OpenAI configuration from environment and creates a client config object.
+ * Provides sensible defaults for optional parameters like API version.
+ *
+ * @returns {object} Object containing modelId and complete client configuration
+ * @throws {LlmError} If required environment variables are missing
+ *
+ * @example
+ * ```typescript
+ * const { modelId, config } = getLlmClient();
+ * const azureProvider = createAzure(config);
+ * const model = azureProvider(modelId);
+ * ```
+ */
 export function getLlmClient(): { modelId: string; config: LlmClientConfig } {
   const resourceName = getRequiredEnv('AZURE_RESOURCE_NAME');
   const apiKey = getRequiredEnv('AZURE_OPENAI_API_KEY');
@@ -104,26 +181,48 @@ function log(fields: Record<string, unknown>) {
   } catch {}
 }
 
-// Minimal non-deprecated chat message type for text-only prompts
+/**
+ * Simplified chat message interface for text-only prompts.
+ * Used for building conversation context for structured generation.
+ */
 export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: string };
 
+/**
+ * Options for LLM API calls with structured generation.
+ * Supports Zod schema validation, timeouts, and retry configuration.
+ */
 export type CallLlmOptions<T> = {
+  /** Array of chat messages forming the conversation context */
   messages: ChatMessage[];
+  /** Zod schema for structured output validation (required for generateObject) */
   schema?: z.ZodType<T>;
+  /** Request timeout in milliseconds (default: 30s) */
   timeoutMs?: number;
+  /** Maximum number of retry attempts (default: 2) */
   maxRetries?: number;
 };
 
+/**
+ * Result type for LLM API calls with success/failure discrimination.
+ * Provides typed responses with usage metrics and error handling.
+ */
 export type CallLlmResult<T = unknown> =
   | {
+      /** Indicates successful completion */
       success: true;
-      data: T; // typed object when schema is provided (required)
+      /** Typed object when schema is provided (required for structured generation) */
+      data: T;
+      /** Token usage metrics for cost tracking */
       usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number };
+      /** Total request duration in milliseconds */
       durationMs: number;
     }
   | {
+      /** Indicates failure */
       success: false;
+      /** Categorized error with retry information */
       error: LlmError;
+      /** Duration until failure in milliseconds */
       durationMs: number;
     };
 
@@ -225,37 +324,74 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
   }
 }
 
+/**
+ * Configuration for weighted confidence calculation across different field types.
+ * Allows customization of how much each field category contributes to overall confidence.
+ */
 export interface ConfidenceWeights {
-  amounts?: number; // invoice_*_amount fields
-  dates?: number; // *_date fields
-  identifiers?: number; // invoice_number, policy_number, account_number
-  addresses?: number; // payment_remittance_* fields
-  names?: number; // vendor_name, community_name, etc.
-  validation?: number; // valid_input field
-  default?: number; // fallback for uncategorized fields
+  /** Weight for monetary amount fields (invoice_*_amount) */
+  amounts?: number;
+  /** Weight for date fields (*_date) */
+  dates?: number;
+  /** Weight for identifier fields (invoice_number, policy_number, account_number) */
+  identifiers?: number;
+  /** Weight for address fields (payment_remittance_*) */
+  addresses?: number;
+  /** Weight for name fields (vendor_name, community_name, etc.) */
+  names?: number;
+  /** Weight for validation fields (valid_input) */
+  validation?: number;
+  /** Default weight for uncategorized fields */
+  default?: number;
 }
 
+/**
+ * Options for structured extraction with confidence customization.
+ */
 export interface ExtractStructuredOptions {
+  /** Custom weights for confidence calculation */
   confidenceWeights?: ConfidenceWeights;
 }
 
+/**
+ * Result of structured extraction with data, tokens, and confidence.
+ */
 export type ExtractStructuredResult<T> = {
+  /** Extracted and normalized structured data */
   data: T;
+  /** Total tokens used for cost tracking */
   tokensUsed?: number | undefined;
+  /** Calculated confidence score (0-1) */
   confidence?: number | undefined;
 };
 
+/**
+ * High-level function for structured data extraction from invoice markdown.
+ *
+ * This function combines LLM inference with data normalization and confidence calculation
+ * to provide a complete extraction pipeline. It includes optimized prompting for invoice
+ * data extraction with reasoning and confidence per field.
+ *
+ * @param {z.ZodType<T>} schema - Zod schema defining the expected output structure
+ * @param {object} input - Input containing markdown text to extract from
+ * @param {ExtractStructuredOptions} options - Optional configuration for confidence weights
+ * @returns {Promise<ExtractStructuredResult<T>>} Structured data with confidence and token usage
+ *
+ * @example
+ * ```typescript
+ * const result = await extractStructured(InvoiceSchema, { markdown: ocrText });
+ * console.log(`Confidence: ${result.confidence}, Tokens: ${result.tokensUsed}`);
+ * ```
+ */
 export async function extractStructured<T>(
   schema: z.ZodType<T>,
   input: { markdown: string },
   options?: ExtractStructuredOptions
 ): Promise<ExtractStructuredResult<T>> {
-  const prompt = `Extract structured data from the following invoice document. Return only fields in the schema, plus reasoning (1–2 sentences for every field, including when null) and confidence (one of: low, medium, high) for every field. For null fields, explain why and set confidence accordingly.
-
-Document content:
-${input.markdown}`;
-
-  const messages: ChatMessage[] = [{ role: 'user', content: prompt }];
+  // Build consistent system+user messages using shared prompt helper
+  // Keeps normalization/disambiguation and output contract centralized
+  const { buildInvoiceExtractionPrompt } = await import('./prompts/invoice.js');
+  const messages: ChatMessage[] = buildInvoiceExtractionPrompt(input.markdown);
 
   const result = await callLlm({
     messages,

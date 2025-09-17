@@ -1,11 +1,68 @@
+/**
+ * @fileoverview LLM Extraction Lambda Handler
+ *
+ * This module implements the final stage of the CIRA Invoice Processing System,
+ * responsible for extracting structured data from OCR text using Azure OpenAI.
+ *
+ * Key Responsibilities:
+ * - Retrieve OCR text from database (stored by OCR processing stage)
+ * - Invoke Azure OpenAI for structured data extraction using AI SDK
+ * - Validate extracted data against Zod schema
+ * - Calculate confidence scores based on field weights
+ * - Persist extraction results to database
+ * - Return structured payload for Step Functions completion
+ *
+ * Processing Flow:
+ * 1. Validate input contains jobId and OCR metadata
+ * 2. Load OCR text from database using jobId
+ * 3. Extract structured data using InvoiceSchema and AI SDK
+ * 4. Validate extraction results and calculate confidence
+ * 5. Persist results including token usage for cost tracking
+ * 6. Return completion payload with metadata
+ *
+ * Integration Features:
+ * - Azure OpenAI integration via AI SDK v5
+ * - Zod schema validation for type safety
+ * - Weighted confidence calculation
+ * - Token usage tracking for cost monitoring
+ * - Comprehensive error handling and logging
+ *
+ * @version 1.0.0
+ * @author CIRA Development Team
+ * @since 2025-09-15
+ */
+
 import { extractStructured } from '../services/llm/client';
 import { InvoiceSchema } from '../services/llm/schemas/invoice';
 import { DatabaseClient } from '@cira/database';
 
+/**
+ * Returns current timestamp in milliseconds for performance measurement.
+ * @returns {number} Current time in milliseconds since Unix epoch
+ */
 function now() {
   return Date.now();
 }
 
+/**
+ * Retrieves database credentials from AWS Secrets Manager or environment variables.
+ *
+ * This function provides flexible credential retrieval with multiple fallback options:
+ * 1. Direct environment variables (DB_USER, DB_PASSWORD) for local development
+ * 2. AWS Secrets Manager for production environments
+ * 3. Graceful fallback for missing credentials
+ *
+ * @returns {Promise<{user?: string, password?: string}>} Database credentials object
+ *
+ * @example
+ * ```typescript
+ * const creds = await getDbCredentials();
+ * if (creds.user && creds.password) {
+ *   dbConfig.user = creds.user;
+ *   dbConfig.password = creds.password;
+ * }
+ * ```
+ */
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
   // Fallback to explicit envs if provided
@@ -28,15 +85,55 @@ async function getDbCredentials() {
   }
 }
 
+/**
+ * Main Lambda handler for LLM-based invoice data extraction.
+ *
+ * This function serves as the final processing stage in the invoice workflow,
+ * taking OCR text and extracting structured invoice data using Azure OpenAI.
+ * It handles the complete extraction pipeline from text input to validated results.
+ *
+ * Input Event Structure:
+ * - jobId: UUID of the job to process
+ * - ocr: OCR metadata from the previous processing stage
+ *   - Can be either { metadata: {...} } or { ocr: { metadata: {...} } }
+ *
+ * Processing Steps:
+ * 1. Validate input parameters (jobId, OCR metadata)
+ * 2. Retrieve OCR text from database
+ * 3. Extract structured data using AI SDK and InvoiceSchema
+ * 4. Validate extraction results
+ * 5. Persist results with confidence scores and token usage
+ * 6. Return structured payload for Step Functions
+ *
+ * @param {any} event - Step Functions event containing jobId and OCR metadata
+ * @returns {Promise<object>} Extraction results with metadata for Step Functions
+ *
+ * @throws {Error} LLM_EXTRACTION_ERROR prefixed errors for Step Functions error handling
+ *
+ * @example
+ * ```typescript
+ * const result = await handler({
+ *   jobId: 'uuid-here',
+ *   ocr: { metadata: { provider: 'mistral', pages: 2 } }
+ * });
+ * // Returns: { jobId, status: 'llm_completed', result: {...}, metadata: {...} }
+ * ```
+ */
 export const handler = async (event: any) => {
   const t0 = now();
   const jobId = event?.jobId ?? null;
   const ocr = event?.ocr;
-  // Support both shapes:
+  // Support both shapes from Step Functions:
   // A) { ocr: { metadata: {...} } }
   // B) { ocr: { ocr: { metadata: {...} }, status, jobId } }
   const ocrMetadata = ocr?.metadata ?? ocr?.ocr?.metadata;
 
+  /**
+   * Structured logging function for CloudWatch integration.
+   * Automatically includes jobId, duration, and timestamp for all log entries.
+   *
+   * @param {Record<string, unknown>} fields - Additional log fields
+   */
   const log = (fields: Record<string, unknown>) => {
     const base = { timestamp: new Date().toISOString(), jobId, durationMs: now() - t0, ...fields };
     console.log(JSON.stringify(base));

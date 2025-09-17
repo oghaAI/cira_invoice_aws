@@ -1,3 +1,37 @@
+/**
+ * @fileoverview Job Management Lambda Handler
+ *
+ * This module implements the core job management Lambda function for the CIRA Invoice Processing System.
+ * It serves as the primary API Gateway integration point, handling all HTTP requests for job lifecycle
+ * management including creation, status checking, and result retrieval.
+ *
+ * Key Responsibilities:
+ * - Job creation with PDF URL validation and Step Functions orchestration
+ * - Job status tracking with real-time phase information
+ * - Result retrieval with structured data extraction
+ * - OCR text retrieval with size limiting and truncation
+ * - Health check endpoint for system monitoring
+ * - Direct Step Functions invocation handling for workflow updates
+ *
+ * API Endpoints:
+ * - POST /jobs - Create new invoice processing job
+ * - GET /jobs/{jobId} - Get complete job information
+ * - GET /jobs/{jobId}/status - Get job status with processing phase
+ * - GET /jobs/{jobId}/result - Get extracted invoice data
+ * - GET /jobs/{jobId}/ocr - Get raw OCR text (with optional truncation)
+ * - GET / - Health check endpoint
+ *
+ * Security Features:
+ * - API key authentication via AWS API Gateway
+ * - Client isolation through API key validation
+ * - Input validation and sanitization
+ * - Error message sanitization to prevent information leakage
+ *
+ * @version 1.0.0
+ * @author CIRA Development Team
+ * @since 2025-09-15
+ */
+
 import { APIGatewayProxyResult } from 'aws-lambda';
 import { DatabaseClient } from '@cira/database';
 import { API_VERSION } from '../index';
@@ -5,6 +39,22 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 
+/**
+ * Retrieves database credentials from AWS Secrets Manager.
+ *
+ * This function handles the secure retrieval of database credentials from AWS Secrets Manager,
+ * with graceful fallback for local development environments where AWS services may not be available.
+ *
+ * @returns {Promise<{user?: string, password?: string}>} Database credentials object
+ *
+ * @example
+ * ```typescript
+ * const creds = await getDbCredentials();
+ * if (creds.user && creds.password) {
+ *   // Use credentials to connect to database
+ * }
+ * ```
+ */
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
   if (!secretArn) return { user: undefined, password: undefined };
@@ -24,8 +74,50 @@ async function getDbCredentials() {
   }
 }
 
+/**
+ * Main Lambda handler for job management operations.
+ *
+ * This function serves as the entry point for all job management operations, handling both
+ * HTTP requests from API Gateway and direct invocations from Step Functions for job status updates.
+ *
+ * Supported Operations:
+ * - HTTP API requests: Job creation, status checking, result retrieval
+ * - Step Functions direct invocation: Job status updates (start, phase, complete, fail)
+ *
+ * The handler implements comprehensive logging, error handling, and database connection management
+ * with automatic cleanup to prevent connection leaks.
+ *
+ * @param {any} event - Either API Gateway event or Step Functions direct invocation payload
+ * @returns {Promise<APIGatewayProxyResult | any>} HTTP response for API Gateway or direct response for Step Functions
+ *
+ * @example
+ * ```typescript
+ * // API Gateway invocation
+ * const apiResponse = await handler({
+ *   httpMethod: 'POST',
+ *   resource: '/jobs',
+ *   body: JSON.stringify({ pdf_url: 'https://example.com/invoice.pdf' })
+ * });
+ *
+ * // Step Functions direct invocation
+ * const stepResponse = await handler({
+ *   action: 'complete',
+ *   jobId: 'job-uuid',
+ *   result: { extractedData: {...}, confidence: 0.95 }
+ * });
+ * ```
+ */
 export const handler = async (event: any): Promise<APIGatewayProxyResult | any> => {
   const start = Date.now();
+
+  /**
+   * Structured logging function that captures request context and timing information.
+   * Logs are formatted as JSON for CloudWatch integration and include security-safe fields.
+   *
+   * @param {string} level - Log level ('info' or 'error')
+   * @param {string} message - Log message
+   * @param {Record<string, unknown>} extra - Additional context fields
+   */
   const log = (level: 'info' | 'error', message: string, extra?: Record<string, unknown>) => {
     const safe = {
       level,
@@ -325,6 +417,22 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
   }
 };
 
+/**
+ * Creates a standardized JSON HTTP response for API Gateway.
+ *
+ * This utility function ensures consistent response formatting across all endpoints,
+ * including proper CORS headers for cross-origin requests and standardized content types.
+ *
+ * @param {number} statusCode - HTTP status code (200, 400, 404, 500, etc.)
+ * @param {unknown} body - Response body object to be JSON-serialized
+ * @returns {APIGatewayProxyResult} Formatted API Gateway response
+ *
+ * @example
+ * ```typescript
+ * return json(200, { job_id: 'abc123', status: 'completed' });
+ * return json(404, errorBody('NOT_FOUND', 'Job not found'));
+ * ```
+ */
 function json(statusCode: number, body: unknown): APIGatewayProxyResult {
   return {
     statusCode,
@@ -338,14 +446,60 @@ function json(statusCode: number, body: unknown): APIGatewayProxyResult {
   };
 }
 
+/**
+ * Creates a standardized error response body structure.
+ *
+ * This function ensures consistent error formatting across all API endpoints,
+ * providing both machine-readable error codes and human-readable messages.
+ *
+ * @param {string} error_code - Machine-readable error identifier
+ * @param {string} message - Human-readable error description
+ * @returns {object} Standardized error object
+ *
+ * @example
+ * ```typescript
+ * errorBody('VALIDATION_ERROR', 'pdf_url is required');
+ * errorBody('NOT_FOUND', 'Job not found');
+ * ```
+ */
 function errorBody(error_code: string, message: string) {
   return { error_code, message };
 }
 
+/**
+ * Validates if a string is a properly formatted UUID (version 1-5).
+ *
+ * This function uses a comprehensive regex pattern to validate UUID format,
+ * ensuring strict compliance with RFC 4122 specification for UUID structure.
+ *
+ * @param {string} id - String to validate as UUID
+ * @returns {boolean} True if string is a valid UUID, false otherwise
+ *
+ * @example
+ * ```typescript
+ * isUuid('550e8400-e29b-41d4-a716-446655440000'); // true
+ * isUuid('invalid-uuid'); // false
+ * ```
+ */
 function isUuid(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
+/**
+ * Converts internal processing phase codes to user-friendly labels.
+ *
+ * This function provides human-readable labels for the different phases of
+ * invoice processing, improving the user experience when checking job status.
+ *
+ * @param {string} phase - Internal phase identifier
+ * @returns {string} User-friendly phase description
+ *
+ * @example
+ * ```typescript
+ * phaseLabel('analyzing_invoice'); // 'Analyzing invoice'
+ * phaseLabel('extracting_data'); // 'Extracting data'
+ * ```
+ */
 function phaseLabel(phase: 'analyzing_invoice' | 'extracting_data' | 'verifying_data'): string {
   switch (phase) {
     case 'analyzing_invoice':

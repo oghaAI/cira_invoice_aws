@@ -1,66 +1,182 @@
-// Database package entry point
-// This is a placeholder for the project setup story
-// Actual database schema and queries will be added in subsequent stories
+/**
+ * CIRA Invoice Processing System - Database Package Entry Point
+ *
+ * This package provides the core database layer for the CIRA Invoice Processing System,
+ * implementing a simplified PostgreSQL-based data persistence layer following the MVP
+ * architecture principles outlined in docs/architecture-mvp.md.
+ *
+ * Key Features:
+ * - Simple, direct database access pattern (no complex ORM abstractions)
+ * - Type-safe operations with TypeScript interfaces
+ * - Connection pooling via node-postgres (pg)
+ * - JSONB storage for flexible invoice data extraction results
+ * - Comprehensive job lifecycle tracking (queued → processing → completed/failed)
+ *
+ * Architecture Alignment:
+ * - Follows "Direct Database Access Pattern" from architecture document
+ * - Supports Step Functions workflow with job status tracking
+ * - Integrates with OCR and LLM processing phases via job results
+ * - Provides foundation for 10,000 invoices/month target processing volume
+ *
+ * @see docs/architecture-mvp.md - Core architecture principles
+ * @see docs/stories/3.2.invoice-schema-zod.md - Invoice data schema
+ */
 
 export const DATABASE_VERSION = '1.1.0';
 
+/**
+ * Job status enumeration representing the lifecycle of an invoice processing job.
+ * Aligns with Step Functions workflow states for seamless orchestration.
+ */
 export type JobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+/**
+ * Processing phase enumeration for granular tracking within the 'processing' status.
+ * Provides visibility into which step of the OCR → LLM → Complete workflow is active.
+ */
 export type ProcessingPhase = 'analyzing_invoice' | 'extracting_data' | 'verifying_data';
 
+/**
+ * Core Job entity representing an invoice processing request.
+ * Maps to the 'jobs' table in PostgreSQL and tracks the complete lifecycle
+ * from initial PDF submission through final completion or failure.
+ *
+ * Lifecycle Flow:
+ * 1. Created with status 'queued' and pdfUrl
+ * 2. Picked up by Step Functions → status becomes 'processing'
+ * 3. processingPhase tracks OCR → LLM → validation steps
+ * 4. Final status: 'completed' (with completedAt) or 'failed' (with errorMessage)
+ */
 export interface Job {
+  /** Unique job identifier (UUID) */
   id: string;
+  /** Optional client identifier for API key attribution and billing */
   clientId: string | null;
+  /** Current job status in the processing pipeline */
   status: JobStatus;
+  /** Detailed processing phase when status is 'processing' */
   processingPhase: ProcessingPhase | null;
+  /** Source PDF URL to be processed */
   pdfUrl: string;
+  /** Timestamp when job was initially created */
   createdAt: Date;
+  /** Timestamp of last status update (auto-updated via trigger) */
   updatedAt: Date;
+  /** Timestamp when job reached final state (completed/failed) */
   completedAt: Date | null;
+  /** Error details if job failed, null for successful jobs */
   errorMessage: string | null;
 }
 
+/**
+ * Job processing results containing both OCR outputs and LLM-extracted structured data.
+ * Maps to the 'job_results' table with JSONB storage for flexible invoice schema evolution.
+ *
+ * Data Flow:
+ * 1. OCR step populates: rawOcrText, ocrProvider, ocrDurationMs, ocrPages
+ * 2. LLM step populates: extractedData (Zod-validated invoice fields), tokensUsed, confidenceScore
+ * 3. Both steps can update existing records via UPSERT operations
+ *
+ * Storage Strategy:
+ * - extractedData stored as JSONB for flexible schema evolution (Story 3.2)
+ * - Supports Zod-validated invoice schemas with field_reasoning and field_confidence
+ * - OCR metadata enables cost tracking and performance optimization
+ */
 export interface JobResult {
+  /** Unique result identifier (UUID) */
   id: string;
+  /** Reference to parent job (foreign key to jobs.id) */
   jobId: string;
+  /**
+   * Structured invoice data extracted by LLM (stored as JSONB).
+   * Contains Zod-validated fields, field_reasoning, and field_confidence maps.
+   * @see docs/stories/3.2.invoice-schema-zod.md
+   */
   extractedData: unknown | null;
+  /** Overall confidence score for the extraction (0.0-1.0 range) */
   confidenceScore: number | null;
+  /** Number of tokens consumed by LLM processing (for cost tracking) */
   tokensUsed: number | null;
+  /** Raw OCR text output (stored for debugging and re-processing) */
   rawOcrText: string | null;
+  /** OCR service identifier (e.g., "docling", "textract") */
   ocrProvider: string | null;
+  /** OCR processing duration in milliseconds (for performance monitoring) */
   ocrDurationMs: number | null;
+  /** Number of pages processed by OCR (for billing and complexity assessment) */
   ocrPages: number | null;
+  /** Timestamp when result was created/last updated */
   createdAt: Date;
 }
 
+/**
+ * Database connection configuration supporting both connection string and discrete parameters.
+ * Provides flexibility for different deployment environments (local dev, Lambda, RDS).
+ *
+ * Connection Strategies:
+ * - Connection string: Preferred for production (supports RDS connection strings)
+ * - Discrete parameters: Useful for development and testing environments
+ * - SSL enabled by default for production security requirements
+ */
 export interface DatabaseClientConfig {
+  /** Complete PostgreSQL connection string (preferred for production) */
   connectionString?: string;
+  /** Database host (when not using connection string) */
   host?: string;
+  /** Database port (default: 5432) */
   port?: number;
+  /** Database name */
   database?: string;
+  /** Database username */
   user?: string;
+  /** Database password */
   password?: string;
+  /** Enable SSL connections (default: true for security) */
   ssl?: boolean;
 }
 
 import { Pool } from 'pg';
 
+/**
+ * Database client interface defining all data access operations for the CIRA system.
+ * Provides a clean abstraction over PostgreSQL operations with support for:
+ * - Job lifecycle management (create, read, update status)
+ * - Processing phase tracking for Step Functions integration
+ * - Job results with OCR and LLM data storage
+ * - Connection management and health monitoring
+ *
+ * Design Principles:
+ * - Simple, direct SQL operations (no complex ORM patterns)
+ * - Type-safe method signatures with comprehensive error handling
+ * - Optimized for Lambda function usage with connection pooling
+ * - UPSERT operations for handling partial updates from different processing steps
+ */
 export interface IDatabaseClient {
-  // lifecycle
+  /** Connection lifecycle management */
   end(): Promise<void>;
 
-  // health
+  /** Database connectivity health check */
   healthCheck(): Promise<boolean>;
 
-  // jobs
+  /** Create new invoice processing job */
   createJob(params: { clientId: string | null; pdfUrl: string }): Promise<Job>;
+  /** Retrieve job by unique identifier */
   getJobById(id: string): Promise<Job | null>;
+  /** List jobs for a specific client with optional filtering */
   listJobsByClient(clientId: string, options?: { limit?: number; status?: JobStatus }): Promise<Job[]>;
+  /** Update job status with optional error message and completion timestamp */
   updateJobStatus(id: string, status: JobStatus, errorMessage?: string | null, completedAt?: Date | null): Promise<Job | null>;
+  /** Mark job as processing (used by Step Functions initiation) */
   setJobStatusProcessing(id: string): Promise<Job | null>;
+  /** Update processing phase for granular progress tracking */
   setJobProcessingPhase(id: string, phase: ProcessingPhase): Promise<Job | null>;
+  /** Clear processing phase (typically on completion or failure) */
   clearJobProcessingPhase(id: string): Promise<Job | null>;
 
-  // results
+  /**
+   * Upsert job result data (supports partial updates from OCR and LLM steps).
+   * Uses COALESCE to preserve existing data when new fields are null.
+   */
   upsertJobResult(params: {
     jobId: string;
     extractedData?: unknown | null;
@@ -71,12 +187,34 @@ export interface IDatabaseClient {
     ocrDurationMs?: number | null;
     ocrPages?: number | null;
   }): Promise<JobResult>;
+  /** Retrieve complete job result by job ID */
   getJobResult(jobId: string): Promise<JobResult | null>;
 }
 
+/**
+ * Concrete implementation of the database client using node-postgres (pg) connection pooling.
+ *
+ * Key Features:
+ * - Connection pooling (max 10 connections) for Lambda efficiency
+ * - SSL-by-default for production security
+ * - Flexible configuration supporting both connection strings and discrete parameters
+ * - Type-safe row mapping between PostgreSQL and TypeScript interfaces
+ * - Comprehensive error handling with proper resource cleanup
+ *
+ * Usage Patterns:
+ * - Lambda functions: Create client per invocation, call client.end() in finally block
+ * - Long-running services: Create singleton client, manage connection lifecycle
+ * - Testing: Use discrete parameters for test database connections
+ */
 export class DatabaseClient implements IDatabaseClient {
   private readonly pool: Pool;
 
+  /**
+   * Initialize database client with connection pooling.
+   * Prefers connection string for production, supports discrete parameters for development.
+   *
+   * @param config - Database connection configuration
+   */
   constructor(config?: DatabaseClientConfig) {
     const connectionString = config?.connectionString;
     this.pool = new Pool(
@@ -94,13 +232,19 @@ export class DatabaseClient implements IDatabaseClient {
     );
   }
 
+  /**
+   * Gracefully close all database connections in the pool.
+   * Should be called when shutting down the application or in Lambda finally blocks.
+   */
   async end(): Promise<void> {
     await this.pool.end();
   }
 
   /**
    * Simple health check to validate database connectivity.
-   * Executes a lightweight `SELECT 1` query.
+   * Executes a lightweight `SELECT 1` query to verify the connection pool is functional.
+   *
+   * @returns Promise resolving to true if database is accessible, false otherwise
    */
   async healthCheck(): Promise<boolean> {
     try {
@@ -111,7 +255,17 @@ export class DatabaseClient implements IDatabaseClient {
     }
   }
 
-  // Jobs
+  // ===== JOB MANAGEMENT OPERATIONS =====
+
+  /**
+   * Create a new invoice processing job with initial 'queued' status.
+   * The job will be picked up by Step Functions for processing.
+   *
+   * @param params - Job creation parameters
+   * @param params.clientId - Optional client identifier for API key attribution
+   * @param params.pdfUrl - URL of the PDF to be processed
+   * @returns Promise resolving to the newly created job
+   */
   async createJob(params: { clientId: string | null; pdfUrl: string }): Promise<Job> {
     const query = `
       INSERT INTO jobs (client_id, pdf_url)
@@ -211,7 +365,21 @@ export class DatabaseClient implements IDatabaseClient {
     return this.mapJob(result.rows[0]);
   }
 
-  // Job Results
+  // ===== JOB RESULTS OPERATIONS =====
+
+  /**
+   * Insert or update job result data using UPSERT pattern.
+   * Supports partial updates from different processing steps (OCR → LLM).
+   * Uses COALESCE to preserve existing data when new fields are null/undefined.
+   *
+   * Processing Flow:
+   * 1. OCR step: Updates rawOcrText, ocrProvider, ocrDurationMs, ocrPages
+   * 2. LLM step: Updates extractedData, confidenceScore, tokensUsed
+   * 3. Each step can run independently without overwriting previous data
+   *
+   * @param params - Job result data (supports partial updates)
+   * @returns Promise resolving to the complete job result
+   */
   async upsertJobResult(params: {
     jobId: string;
     extractedData?: unknown | null;
@@ -265,6 +433,15 @@ export class DatabaseClient implements IDatabaseClient {
     return this.mapJobResult(result.rows[0]);
   }
 
+  // ===== PRIVATE MAPPING UTILITIES =====
+
+  /**
+   * Map PostgreSQL row data to typed Job interface.
+   * Handles snake_case to camelCase conversion and proper type coercion.
+   *
+   * @param row - Raw database row from jobs table
+   * @returns Typed Job object
+   */
   private mapJob(row: any): Job {
     return {
       id: row.id,
@@ -279,6 +456,18 @@ export class DatabaseClient implements IDatabaseClient {
     };
   }
 
+  /**
+   * Map PostgreSQL row data to typed JobResult interface.
+   * Handles JSONB parsing, numeric coercion, and null safety.
+   *
+   * Special Handling:
+   * - extractedData: JSONB field parsed from string or object
+   * - Numeric fields: Safely converted with null preservation
+   * - Optional fields: Proper null handling for database NULL values
+   *
+   * @param row - Raw database row from job_results table
+   * @returns Typed JobResult object
+   */
   private mapJobResult(row: any): JobResult {
     return {
       id: row.id,
@@ -297,6 +486,22 @@ export class DatabaseClient implements IDatabaseClient {
   }
 }
 
+/**
+ * Utility function for managing database client lifecycle in Lambda functions.
+ * Ensures proper connection cleanup even if the operation throws an error.
+ *
+ * Usage Pattern:
+ * ```typescript
+ * const result = await withDatabaseClient(config, async (client) => {
+ *   const job = await client.createJob({ clientId: null, pdfUrl: 'https://...' });
+ *   return job;
+ * });
+ * ```
+ *
+ * @param config - Database connection configuration
+ * @param fn - Async function that receives the database client
+ * @returns Promise resolving to the function result
+ */
 export async function withDatabaseClient<T>(
   config: DatabaseClientConfig | undefined,
   fn: (client: DatabaseClient) => Promise<T>

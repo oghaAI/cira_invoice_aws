@@ -1,26 +1,80 @@
-/*
-  Story 2.2: PDF URL Processing and Validation
-  - Perform deep validation in this egress-enabled worker
-  - Keep minimal, privacy-preserving logs
-  - Stream response without persisting to disk; enforce size cap
-*/
+/**
+ * @fileoverview OCR Processing Lambda Handler
+ *
+ * This module implements the OCR processing stage of the CIRA Invoice Processing System.
+ * It handles PDF URL validation, content retrieval, and OCR text extraction through
+ * external OCR providers (primarily Mistral OCR service).
+ *
+ * Key Responsibilities:
+ * - PDF URL validation with domain allowlisting for security
+ * - HTTP content retrieval with size limits and timeout handling
+ * - Content-Type validation to ensure PDF files
+ * - OCR text extraction via configurable providers
+ * - Database persistence of OCR results
+ * - Comprehensive error handling and logging
+ *
+ * Security Features:
+ * - Domain allowlisting to prevent SSRF attacks
+ * - HTTPS-only URL validation
+ * - Content size limits (15MB for PDFs, 1MB for OCR text)
+ * - Network timeout protection
+ * - UTF-8 safety validation for extracted text
+ *
+ * Processing Flow:
+ * 1. Validate PDF URL format and domain
+ * 2. Fetch PDF content with size and timeout limits
+ * 3. Validate content type as PDF
+ * 4. Extract text using OCR provider
+ * 5. Validate and persist OCR results
+ * 6. Return compact payload for Step Functions
+ *
+ * @version 1.0.0
+ * @author CIRA Development Team
+ * @since 2025-09-15
+ */
 
+/**
+ * Decision codes used for logging and error classification in OCR processing.
+ * These codes help categorize different types of validation and processing errors.
+ */
 type DecisionCode =
-  | 'OK'
-  | 'VALIDATION_ERROR_URL'
-  | 'VALIDATION_ERROR_PROTOCOL'
-  | 'VALIDATION_ERROR_DOMAIN'
-  | 'VALIDATION_ERROR_TYPE'
-  | 'NETWORK_ERROR'
-  | 'PDF_TOO_LARGE';
+  | 'OK'                      // Successful processing
+  | 'VALIDATION_ERROR_URL'    // Invalid URL format or structure
+  | 'VALIDATION_ERROR_PROTOCOL' // Non-HTTPS protocol
+  | 'VALIDATION_ERROR_DOMAIN' // Domain not in allowlist
+  | 'VALIDATION_ERROR_TYPE'   // Content is not a PDF
+  | 'NETWORK_ERROR'          // Network connectivity issues
+  | 'PDF_TOO_LARGE';         // PDF exceeds size limits
 
+/** Maximum allowed PDF file size in bytes (15MB) to prevent memory exhaustion */
 const MAX_PDF_BYTES = 15 * 1024 * 1024; // 15MB
+
+/** Total timeout for PDF fetch operations in milliseconds (20 seconds) */
 const TOTAL_TIMEOUT_MS = 20_000; // ~20s
 
+/**
+ * Returns current timestamp in milliseconds for performance measurement.
+ * @returns {number} Current time in milliseconds since Unix epoch
+ */
 function now() {
   return Date.now();
 }
 
+/**
+ * Parses the allowed PDF host domains from environment configuration.
+ *
+ * This function implements domain allowlisting for security, preventing SSRF attacks
+ * by restricting PDF downloads to trusted domains. Supports wildcard subdomain matching.
+ *
+ * @returns {string[]} Array of allowed domain patterns
+ *
+ * @example
+ * ```typescript
+ * // With ALLOWED_PDF_HOSTS="s3.amazonaws.com,example.com"
+ * const domains = parseAllowedDomains();
+ * // Returns: ['s3.amazonaws.com', 'example.com']
+ * ```
+ */
 function parseAllowedDomains(): string[] {
   const env = process.env['ALLOWED_PDF_HOSTS']?.trim();
   if (env && env.length > 0) {
@@ -37,16 +91,44 @@ function parseAllowedDomains(): string[] {
   ];
 }
 
+/**
+ * Checks if a hostname is allowed based on the domain allowlist.
+ *
+ * This function implements secure domain validation by checking if the provided hostname
+ * matches any domain in the allowlist, supporting both exact matches and subdomain matching.
+ *
+ * @param {string} hostname - The hostname to validate
+ * @param {string[]} allowlist - Array of allowed domain patterns
+ * @returns {boolean} True if hostname is allowed, false otherwise
+ *
+ * @example
+ * ```typescript
+ * isAllowedHost('files.s3.amazonaws.com', ['amazonaws.com']); // true
+ * isAllowedHost('malicious.com', ['amazonaws.com']); // false
+ * ```
+ */
 function isAllowedHost(hostname: string, allowlist: string[]): boolean {
   const hn = hostname.toLowerCase();
   return allowlist.some(domain => hn === domain || hn.endsWith(`.${domain.toLowerCase()}`));
 }
 
+/**
+ * Validates if the Content-Type header indicates a PDF file.
+ *
+ * @param {string | null} contentType - HTTP Content-Type header value
+ * @returns {boolean} True if content type indicates PDF, false otherwise
+ */
 function isLikelyPdfFromHeaders(contentType: string | null): boolean {
   if (!contentType) return false;
   return /application\/(pdf)(;.*)?$/i.test(contentType);
 }
 
+/**
+ * Checks if a URL path has a .pdf file extension.
+ *
+ * @param {string} urlPath - URL pathname to check
+ * @returns {boolean} True if path ends with .pdf extension, false otherwise
+ */
 function hasPdfExtension(urlPath: string): boolean {
   return urlPath.toLowerCase().endsWith('.pdf');
 }
