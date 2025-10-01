@@ -20,6 +20,7 @@
     "@aws-sdk/client-sfn": "^3.888.0",
     "@cira/database": "*",
     "@cira/shared": "*",
+    "@quail-ai/azure-ai-provider": "^2.0.0",
     "ai": "^5.0.44",
     "bcrypt": "^6.0.0",
     "hono": "^4.9.6",

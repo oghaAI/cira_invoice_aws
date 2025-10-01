@@ -89,6 +89,7 @@ export class ApiStack extends cdk.Stack {
       OCR_PROVIDER: process.env['OCR_PROVIDER'] ?? 'mistral',
       MISTRAL_OCR_API_URL: process.env['MISTRAL_OCR_API_URL'] ?? '',
       MISTRAL_API_KEY: process.env['MISTRAL_API_KEY'] ?? '',
+      INTERNAL_OCR_URL: process.env['INTERNAL_OCR_URL'] ?? process.env['OCR_INTERNAL_URL'] ?? '',
       ALLOWED_PDF_HOSTS: process.env['ALLOWED_PDF_HOSTS'] ?? 'api.ciranet.com',
       OCR_TEXT_MAX_BYTES: process.env['OCR_TEXT_MAX_BYTES'] ?? '1048576',
       OCR_RETRIEVAL_MAX_BYTES: process.env['OCR_RETRIEVAL_MAX_BYTES'] ?? '262144'
@@ -124,11 +125,11 @@ export class ApiStack extends cdk.Stack {
       entry: '../api/src/handlers/llm-extraction.ts',
       environment: {
         ...lambdaEnvironment,
-        // Azure OpenAI configuration (injected from deployment env)
-        AZURE_RESOURCE_NAME: process.env['AZURE_RESOURCE_NAME'] ?? '',
-        AZURE_OPENAI_ENDPOINT: process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
-        AZURE_OPENAI_API_KEY: process.env['AZURE_OPENAI_API_KEY'] ?? '',
-        AZURE_OPENAI_DEPLOYMENT: process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
+        // Azure-hosted model configuration (supports both new and legacy envs)
+        AZURE_API_ENDPOINT:
+          process.env['AZURE_API_ENDPOINT'] ?? process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
+        AZURE_API_KEY: process.env['AZURE_API_KEY'] ?? process.env['AZURE_OPENAI_API_KEY'] ?? '',
+        AZURE_MODEL: process.env['AZURE_MODEL'] ?? process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
         AZURE_OPENAI_API_VERSION: process.env['AZURE_OPENAI_API_VERSION'] ?? '2024-08-01-preview'
       },
       vpc: props.databaseStack.vpc as unknown as ec2.IVpc,

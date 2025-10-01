@@ -27,7 +27,9 @@
  */
 
 import { z } from 'zod';
-import { createAzure } from '@ai-sdk/azure';
+import { createAzure as createAzureOpenAI } from '@ai-sdk/azure';
+import { createAzure as createAzureCustom } from '@quail-ai/azure-ai-provider';
+
 import { generateObject } from 'ai';
 
 /**
@@ -82,19 +84,24 @@ export class LlmError extends Error {
 }
 
 /**
- * Configuration interface for Azure OpenAI LLM client.
- * Contains all necessary parameters for Azure OpenAI API authentication and routing.
+ * Configuration for the underlying Azure provider. Supports both
+ * Azure OpenAI-compatible deployments and the native Azure AI endpoints.
  */
-export interface LlmClientConfig {
-  /** Azure OpenAI resource name (e.g., cira-invoice-data-extraction) */
-  resourceName: string;
-  /** Azure OpenAI API key for authentication */
-  apiKey: string;
-  /** Azure deployment name (acts as model ID for API calls) */
-  deployment: string;
-  /** Azure OpenAI API version (e.g., 2024-12-01-preview) */
-  apiVersion: string;
-}
+export type LlmClientConfig =
+  | {
+      mode: 'azure-custom';
+      deployment: string;
+      endpoint: string;
+      apiKey: string;
+    }
+  | {
+      mode: 'azure-openai';
+      deployment: string;
+      resourceName: string;
+      apiKey: string;
+      apiVersion: string;
+      useDeploymentUrls: boolean;
+    };
 
 /**
  * Safely retrieves a required environment variable with validation.
@@ -133,11 +140,46 @@ export function getRequiredEnv(name: string): string {
  * ```
  */
 export function getLlmClient(): { modelId: string; config: LlmClientConfig } {
-  const resourceName = getRequiredEnv('AZURE_RESOURCE_NAME');
-  const apiKey = getRequiredEnv('AZURE_OPENAI_API_KEY');
-  const deployment = getRequiredEnv('AZURE_OPENAI_DEPLOYMENT');
+  const customEndpoint = process.env['AZURE_API_ENDPOINT']?.trim();
+  const customKey = process.env['AZURE_API_KEY']?.trim();
+  const customModel = process.env['AZURE_MODEL']?.trim();
+
+  if (customEndpoint && customKey && customModel) {
+    return {
+      modelId: customModel,
+      config: {
+        mode: 'azure-custom',
+        deployment: customModel,
+        endpoint: customEndpoint,
+        apiKey: customKey
+      }
+    };
+  }
+
+  const resourceName = process.env['AZURE_RESOURCE_NAME']?.trim();
+  const openAiKey = process.env['AZURE_OPENAI_API_KEY']?.trim();
+  const deployment = process.env['AZURE_OPENAI_DEPLOYMENT']?.trim();
   const apiVersion = (process.env['AZURE_OPENAI_API_VERSION'] as string | undefined)?.trim() || '2024-12-01-preview';
-  return { modelId: deployment, config: { resourceName, apiKey, deployment, apiVersion } };
+  const useDeploymentUrls = process.env['AZURE_USE_DEPLOYMENT_URLS'] === '1';
+
+  if (resourceName && openAiKey && deployment) {
+    return {
+      modelId: deployment,
+      config: {
+        mode: 'azure-openai',
+        deployment,
+        resourceName,
+        apiKey: openAiKey,
+        apiVersion,
+        useDeploymentUrls
+      }
+    };
+  }
+
+  throw new LlmError({
+    message: 'Missing required env: configure either AZURE_API_* or AZURE_RESOURCE_NAME/AZURE_OPENAI_* values',
+    category: 'VALIDATION'
+  });
 }
 
 function mapStatusToCategory(status: number): LlmErrorCategory {
@@ -169,11 +211,19 @@ function mapError(err: unknown): unknown {
 }
 
 function jitter(base: number, spread = 200) {
+  /**
+   * Adds small random jitter (0..spread) to a base delay to avoid
+   * synchronized retries (thundering herd). Used by retry backoff.
+   */
   const j = Math.floor(Math.random() * spread);
   return base + j;
 }
 
 function log(fields: Record<string, unknown>) {
+  /**
+   * Best-effort structured logging wrapper. Intentionally swallows
+   * serialization failures to avoid masking the real error paths.
+   */
   try {
     const base = { timestamp: new Date().toISOString(), ...fields };
     // eslint-disable-next-line no-console
@@ -231,6 +281,8 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
   let modelId: string;
   let config: LlmClientConfig;
   try {
+    // 1) Load provider configuration from environment variables.
+    //    Supports either Azure native (azure-custom) or Azure OpenAI compatible (azure-openai).
     const loaded = getLlmClient();
     modelId = loaded.modelId;
     config = loaded.config;
@@ -242,19 +294,28 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
     return { success: false, error: err, durationMs: Date.now() - t0 };
   }
 
-  // Configure Azure OpenAI provider via AI SDK v5 Azure provider
-  // Use resourceName; provider will construct https://{resourceName}.openai.azure.com/openai/v1
-  const useDeploymentUrls = process.env['AZURE_USE_DEPLOYMENT_URLS'] === '1';
-  const azureProvider = createAzure({
-    resourceName: config.resourceName,
-    apiKey: config.apiKey,
-    apiVersion: config.apiVersion,
-    useDeploymentBasedUrls: useDeploymentUrls
-  });
+  const providerName = config.mode === 'azure-custom' ? 'azure_custom' : 'azure_openai';
 
-  // The callable model is the deployment name (modelId)
-  const model = azureProvider(modelId);
+  let model: any;
+  if (config.mode === 'azure-custom') {
+    // Create a provider bound to Azure AI endpoint (non-OpenAI compatible surface)
+    const azureProvider = createAzureCustom({
+      apiKey: config.apiKey,
+      endpoint: config.endpoint
+    });
+    model = azureProvider(modelId);
+  } else {
+    // Create a provider bound to Azure OpenAI-compatible deployment URLs
+    const azureProvider = createAzureOpenAI({
+      resourceName: config.resourceName,
+      apiKey: config.apiKey,
+      apiVersion: config.apiVersion,
+      useDeploymentBasedUrls: config.useDeploymentUrls
+    });
+    model = azureProvider(modelId);
+  }
 
+  // 2) Configure timeouts and retry policy (exponential-ish backoff with jitter)
   const timeoutMs =
     Number.isFinite(opts.timeoutMs) && (opts.timeoutMs as number) > 0 ? (opts.timeoutMs as number) : 30_000;
   const maxRetries = Number.isFinite(opts.maxRetries) ? Math.max(0, Math.trunc(opts.maxRetries as number)) : 2;
@@ -263,10 +324,12 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
   let attempt = 0;
 
   while (true) {
+    // Each attempt uses an AbortController to enforce the per-call timeout
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
     const aStart = Date.now();
     try {
+      // Structured generation requires an explicit Zod schema
       if (!opts.schema) {
         throw new LlmError({ message: 'Schema required for structured generation', category: 'VALIDATION' });
       }
@@ -274,13 +337,34 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
         model,
         messages: opts.messages as any,
         schema: opts.schema,
-        signal: controller.signal
+        signal: controller.signal,
+        experimental_transform: {
+          // Clean up markdown-wrapped JSON if LLM ignores instructions
+          response: (text: string) => {
+            if (typeof text === 'string' && text.trim().startsWith('```json')) {
+              return text
+                .replace(/^```json\s*/i, '')
+                .replace(/```\s*$/i, '')
+                .trim();
+            }
+            return text;
+          }
+        }
       });
       clearTimeout(timer);
       const durationMs = Date.now() - t0;
       const usage = result.usage as any;
+      // Log request/response previews for observability without dumping full bodies
       log({
-        provider: 'azure_openai',
+        provider: providerName,
+        model: modelId,
+        attempt,
+        status: 'request_metadata',
+        requestBodyPreview: clipUnknown(result.request?.body, 2000),
+        responseBodyPreview: clipUnknown(result.response?.body, 2000)
+      });
+      log({
+        provider: providerName,
         model: modelId,
         attempt,
         durationMs: Date.now() - aStart,
@@ -290,11 +374,30 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
       return { success: true, data: result.object as T, usage, durationMs };
     } catch (e) {
       clearTimeout(timer);
-      const err = mapError(e);
+      let caught: unknown = e;
+
+      // If the AI SDK exposes request/response bodies on error, capture short previews
+      if (caught && typeof caught === 'object') {
+        const req = (caught as any).request?.body;
+        const res = (caught as any).response?.body;
+        if (req !== undefined || res !== undefined) {
+          log({
+            provider: providerName,
+            model: modelId,
+            attempt,
+            status: 'request_metadata_error',
+            requestBodyPreview: clipUnknown(req, 2000),
+            responseBodyPreview: clipUnknown(res, 2000)
+          });
+        }
+      }
+
+      const err = mapError(caught);
       if (err instanceof LlmError) {
-        // Decide retry based on category
+        if (!err.provider) err.provider = providerName;
+        // Decide retry based on category (QUOTA/TIMEOUT/SERVER are transient)
         const retryable = err.category === 'QUOTA' || err.category === 'TIMEOUT' || err.category === 'SERVER';
-        log({ provider: 'azure_openai', model: modelId, attempt, status: 'error', category: err.category });
+        log({ provider: providerName, model: modelId, attempt, status: 'error', category: err.category });
         if (retryable && attempt < maxRetries) {
           const idx = Math.min(attempt, attempts.length - 1);
           await new Promise(res => setTimeout(res, jitter(attempts[idx] ?? 0)));
@@ -304,15 +407,16 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
         return { success: false, error: err, durationMs: Date.now() - t0 };
       }
       // Unknown error, try to map HTTPish status if present
-      const message = err instanceof Error ? err.message : 'Unknown LLM error';
+      const message = caught instanceof Error ? caught.message : 'Unknown LLM error';
       // Try to detect HTTP status embedded in error
       let category: LlmErrorCategory = 'SERVER';
       if (/\b(400)\b/.test(message)) category = 'VALIDATION';
       else if (/\b(401|403)\b/.test(message)) category = 'AUTH';
       else if (/\b429\b/.test(message)) category = 'QUOTA';
       else if (/\b(5\d\d)\b/.test(message)) category = 'SERVER';
-      const wrapped = new LlmError({ message, category });
-      log({ provider: 'azure_openai', model: modelId, attempt, status: 'error', category: wrapped.category });
+      const wrapped = new LlmError({ message, category, provider: providerName });
+      log({ provider: providerName, model: modelId, attempt, status: 'error', category: wrapped.category });
+      // Only retry if the derived category appears transient
       if ((wrapped.category === 'QUOTA' || wrapped.category === 'SERVER') && attempt < maxRetries) {
         const idx = Math.min(attempt, attempts.length - 1);
         await new Promise(res => setTimeout(res, jitter(attempts[idx] ?? 0)));
@@ -393,6 +497,8 @@ export async function extractStructured<T>(
   const { buildInvoiceExtractionPrompt } = await import('./prompts/invoice.js');
   const messages: ChatMessage[] = buildInvoiceExtractionPrompt(input.markdown);
 
+  // Call the LLM with structured output enforced by the provided Zod schema.
+  // Timeout and retries are tuned for OCR-like, longer prompts.
   const result = await callLlm({
     messages,
     schema,
@@ -404,7 +510,8 @@ export async function extractStructured<T>(
     throw result.error;
   }
 
-  // Apply minimal normalization
+  // Apply minimal normalization to improve downstream consistency (trim strings,
+  // coerce numeric-looking amount strings to numbers).
   const normalizedData = normalizeExtractedData(result.data as T);
 
   return {
@@ -414,7 +521,24 @@ export async function extractStructured<T>(
   };
 }
 
+function clipString(value: string, max = 2000): string {
+  if (typeof value !== 'string') return '';
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+function clipUnknown(value: unknown, max = 2000): string | null {
+  if (value === null || value === undefined) return null;
+  const str = typeof value === 'string' ? value : JSON.stringify(value);
+  return clipString(str, max);
+}
+
 function normalizeExtractedData<T>(data: T): T {
+  /**
+   * Performs lightweight, lossless normalization on the model output:
+   * - Trims string values to remove accidental whitespace
+   * - For fields that look like monetary amounts, safely coerces numeric-like
+   *   strings to numbers (preserves null/undefined and non-finite values)
+   */
   if (data === null || data === undefined || typeof data !== 'object') {
     return data;
   }
@@ -442,6 +566,11 @@ function normalizeExtractedData<T>(data: T): T {
 }
 
 function getFieldCategory(fieldName: string): keyof ConfidenceWeights {
+  /**
+   * Heuristically map a field name to a confidence weight category.
+   * This allows weighting certain field types (amounts, dates, IDs, etc.)
+   * more heavily when computing an overall confidence score.
+   */
   if (fieldName.includes('amount')) return 'amounts';
   if (fieldName.includes('date')) return 'dates';
   if (['invoice_number', 'policy_number', 'account_number'].includes(fieldName)) return 'identifiers';
@@ -452,6 +581,14 @@ function getFieldCategory(fieldName: string): keyof ConfidenceWeights {
 }
 
 function calculateWeightedConfidence<T>(data: T, weights?: ConfidenceWeights): number {
+  /**
+   * Compute a single confidence score (0..1) as a weighted average of
+   * per-field confidence levels. Field-level confidences are mapped from
+   * strings → numeric scores (high=0.9, medium=0.6, low=0.3).
+   *
+   * Weights can be customized per category; defaults emphasize monetary
+   * amounts and dates as generally more critical in invoices.
+   */
   if (!data || typeof data !== 'object') return 0;
 
   // Default weights
@@ -505,9 +642,17 @@ type AiFns = {
 let __aiFns: AiFns = { generateObject };
 
 export function __setAiFns(fns: Partial<AiFns>) {
+  /**
+   * Test seam: override AI SDK functions (e.g., generateObject) in unit tests
+   * without relying on ESM mocking. Only intended for testing.
+   */
   __aiFns = { ...__aiFns, ...fns };
 }
 
 export function __resetAiFns() {
+  /**
+   * Restore AI SDK function bindings to their production defaults.
+   * Complements __setAiFns within the test lifecycle.
+   */
   __aiFns = { generateObject };
 }

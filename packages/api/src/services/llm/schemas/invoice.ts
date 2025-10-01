@@ -58,17 +58,18 @@ const ReasonedField = <T>(valueSchema: z.ZodType<T>) =>
       /** The extracted value of the specified type */
       value: valueSchema,
       /** Explanation (optional). Keep concise; do not include chain-of-thought. */
-      reasoning: z.string().max(120).optional(),
+      reasoning: z.string().max(120).nullable().optional(),
       /** Categorical reason for selection (optional) */
       reason_code: z.enum(['explicit_label', 'nearby_header', 'inferred_layout', 'conflict', 'missing']).optional(),
       /** Short evidence excerpt from source text (optional) */
-      evidence_snippet: z.string().max(80).optional(),
+      evidence_snippet: z.string().max(80).nullable().optional(),
       /** Confidence level for this extraction */
-      confidence: z.enum(['low', 'medium', 'high']),
+      confidence: z.enum(['low', 'medium', 'high']).nullable(),
       /** Optional assumptions made during extraction */
       assumptions: z.array(z.string()).optional()
     })
-    .optional();
+    .optional()
+    .default(() => ({ value: null as unknown as T, confidence: 'low' as const }));
 
 /**
  * Comprehensive invoice data extraction schema with reasoned field extraction.
@@ -193,11 +194,15 @@ export const InvoiceSchema = z.object({
     'Past due amount, overdue balance, or previous unpaid amounts carried forward.'
   ),
 
-  /** Current amount due - primary payment amount for this invoice */
+  /** Current period charges - new charges for this billing period only */
   invoice_current_due_amount: ReasonedField(z.number().nullable()).describe(
-    'Current amount due, total due, or balance due for this billing period.'
+    'Current period charges, new charges, or current month amount. Look for "Total new charges", "Current charges", "This period".'
   ),
 
+  /** Total amount owed - final amount due including all charges and credits */
+  total_amount_due: ReasonedField(z.number().nullable()).describe(
+    'Total amount due, balance due, or final amount owed. Look for "Total amount you owe", "Total Due", "Balance Due".'
+  ),
   /** Late fee charges - penalties for overdue payments */
   invoice_late_fee_amount: ReasonedField(z.number().nullable()).describe(
     'Late fee, penalty amount, or additional charges for overdue payments.'

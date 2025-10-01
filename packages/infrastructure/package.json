@@ -25,8 +25,8 @@
     "destroy": "cdk destroy"
   },
   "dependencies": {
-    "@cira/shared": "*",
     "@aws-sdk/client-secrets-manager": "^3.645.0",
+    "@cira/shared": "*",
     "aws-cdk-lib": "^2.214.0",
     "constructs": "^10.4.2",
     "pg": "^8.13.0"

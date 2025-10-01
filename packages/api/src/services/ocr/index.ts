@@ -15,7 +15,7 @@
  *
  * Supported Providers:
  * - Mistral OCR API (default) - cloud-based OCR service
- * - Extensible for additional providers (Docling, Tesseract, etc.)
+ * - Internal Docling OCR service - AWS-hosted Docling deployment
  *
  * @version 1.0.0
  * @author CIRA Development Team
@@ -144,6 +144,7 @@ export function isRetryable(category: OcrErrorCategory): boolean {
 
 // Factory loader (kept simple for now)
 import { mistralProvider } from './mistral';
+import { internalProvider } from './internal';
 
 /**
  * Factory function to get the configured OCR provider instance.
@@ -161,10 +162,12 @@ import { mistralProvider } from './mistral';
  * ```
  */
 export function getOcrProvider(): OcrProvider {
-  const id = ((process.env['OCR_PROVIDER'] as string | undefined) || 'mistral').toLowerCase();
+  const id = ((process.env['OCR_PROVIDER'] as string | undefined) || 'internal').toLowerCase();
   switch (id) {
     case 'mistral':
       return mistralProvider();
+    case 'internal':
+      return internalProvider();
     default:
       throw new OcrError({ message: `Unknown OCR provider: ${id}`, category: 'VALIDATION' });
   }
