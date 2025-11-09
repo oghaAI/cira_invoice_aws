@@ -70,7 +70,7 @@ export class ApiStack extends cdk.Stack {
       environment: lambdaEnvironment,
       vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
       vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_ISOLATED
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
       },
       securityGroups: [lambdaSecurityGroup],
       role: lambdaRole,
