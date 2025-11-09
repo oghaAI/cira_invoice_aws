@@ -67,7 +67,8 @@ export function internalProvider(): OcrProvider {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          accept: 'application/json'
+          'accept': 'application/json',
+          'user-agent': 'CIRA-Invoice-Processor/1.0'
         },
         body: JSON.stringify(payload)
       });

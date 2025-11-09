@@ -64,7 +64,7 @@ const ReasonedField = <T>(valueSchema: z.ZodType<T>) =>
       /** Short evidence excerpt from source text (optional) */
       evidence_snippet: z.string().max(80).nullable().optional(),
       /** Confidence level for this extraction */
-      confidence: z.enum(['low', 'medium', 'high']).nullable(),
+      confidence: z.enum(['low', 'medium', 'high']).nullable().optional().default('low'),
       /** Optional assumptions made during extraction */
       assumptions: z.array(z.string()).optional()
     })
@@ -213,12 +213,35 @@ export const InvoiceSchema = z.object({
     'Credit amount, credit balance, or refund amount applied to the account.'
   ),
 
-  // === VALIDATION FIELDS ===
-  // Quality control and document validation
+  // === VALIDATION AND CLASSIFICATION FIELDS ===
+  // Quality control, document validation, and invoice categorization
 
   /** Document validity assessment - whether this is a processable invoice */
   valid_input: ReasonedField(z.boolean()).describe(
     'Whether the input document appears to be a valid invoice that can be processed.'
+  ),
+
+  /** Invoice type classification - determined in first extraction stage */
+  invoice_type: ReasonedField(z.enum(['general', 'insurance', 'utility', 'tax'])).describe(
+    'The type of invoice: general (standard vendor), insurance (policy-based), utility (service-based), or tax (property tax).'
+  ),
+
+  // === TYPE-SPECIFIC FIELDS ===
+  // Fields that are only relevant for certain invoice types
+
+  /** Tax year - required for tax invoices */
+  tax_year: ReasonedField(z.string().nullable()).describe(
+    'Tax year for property tax invoices. Extract the year this tax bill applies to.'
+  ),
+
+  /** Property/Parcel identifier - required for tax invoices */
+  property_id: ReasonedField(z.string().nullable()).describe(
+    'Property ID, Parcel ID, or Parcel Number for tax invoices. May also be labeled as Assessment Number or Tax ID.'
+  ),
+
+  /** Service termination status - for utility and insurance invoices */
+  service_termination: ReasonedField(z.boolean().nullable()).describe(
+    'Whether the invoice indicates service termination or cancellation. Relevant for utility and insurance invoices.'
   )
 });
 
@@ -246,3 +269,105 @@ export const InvoiceSchema = z.object({
  * ```
  */
 export type Invoice = z.infer<typeof InvoiceSchema>;
+
+/**
+ * Field sets for different invoice types.
+ *
+ * This defines which fields should be extracted for each invoice type.
+ * - vendor: Default fields extracted for all invoice types
+ * - insurance: Additional fields for insurance policy invoices
+ * - utility: Additional fields for utility service invoices
+ * - tax: Additional fields for property tax invoices
+ */
+export const INVOICE_TYPE_FIELDS = {
+  // Default fields - extracted for ALL invoice types
+  vendor: [
+    'invoice_date',
+    'invoice_due_date',
+    'invoice_number',
+    'account_number',
+    'vendor_name',
+    'community_name',
+    'payment_remittance_entity',
+    'payment_remittance_entity_care_of',
+    'payment_remittance_address',
+    'reasoning',
+    'invoice_past_due_amount',
+    'invoice_current_due_amount',
+    'total_amount_due',
+    'invoice_late_fee_amount',
+    'credit_amount',
+    'valid_input',
+    'invoice_type'
+  ] as const,
+
+  // Insurance-specific fields (in addition to vendor fields)
+  insurance: [
+    'policy_start_date',
+    'policy_end_date',
+    'policy_number',
+    'service_termination'
+  ] as const,
+
+  // Utility-specific fields (in addition to vendor fields)
+  utility: [
+    'service_start_date',
+    'service_end_date',
+    'service_termination'
+  ] as const,
+
+  // Tax-specific fields (in addition to vendor fields)
+  tax: [
+    'tax_year',
+    'property_id'
+  ] as const
+} as const;
+
+/**
+ * Creates a type-specific invoice schema based on the invoice type.
+ *
+ * This function dynamically constructs a Zod schema that includes only the fields
+ * relevant to the specified invoice type. This approach:
+ * - Reduces token usage by excluding irrelevant fields
+ * - Prevents hallucination on type-specific fields
+ * - Provides stronger type safety and validation
+ * - Makes extraction more deterministic
+ *
+ * @param {string} invoiceType - The invoice type (general, insurance, utility, tax)
+ * @returns {z.ZodObject} Type-specific schema with only relevant fields
+ *
+ * @example
+ * ```typescript
+ * const insuranceSchema = buildInvoiceSchemaForType('insurance');
+ * // Returns schema with vendor fields + insurance-specific fields
+ *
+ * const generalSchema = buildInvoiceSchemaForType('general');
+ * // Returns schema with only vendor fields
+ * ```
+ */
+export function buildInvoiceSchemaForType(invoiceType: 'general' | 'insurance' | 'utility' | 'tax'): z.ZodObject<any> {
+  // Start with vendor (default) fields
+  const fieldNames: string[] = [...INVOICE_TYPE_FIELDS.vendor];
+
+  // Add type-specific fields
+  if (invoiceType === 'insurance') {
+    fieldNames.push(...INVOICE_TYPE_FIELDS.insurance);
+  } else if (invoiceType === 'utility') {
+    fieldNames.push(...INVOICE_TYPE_FIELDS.utility);
+  } else if (invoiceType === 'tax') {
+    fieldNames.push(...INVOICE_TYPE_FIELDS.tax);
+  }
+  // 'general' type only gets vendor fields
+
+  // Build schema shape with only the relevant fields
+  const schemaShape: Record<string, any> = {};
+  const fullSchema = InvoiceSchema.shape;
+
+  for (const fieldName of fieldNames) {
+    if (fieldName in fullSchema) {
+      schemaShape[fieldName] = fullSchema[fieldName as keyof typeof fullSchema];
+    }
+  }
+
+  return z.object(schemaShape);
+}

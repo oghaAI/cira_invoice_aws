@@ -73,17 +73,26 @@ const stackProps: cdk.StackProps = {
 // INFRASTRUCTURE STACK CREATION AND DEPENDENCY MANAGEMENT
 // ============================================================================
 
-// 1. Database Stack (Foundation Layer)
+// 1. Database Stack (Foundation Layer) - OPTIONAL
 // Creates PostgreSQL RDS instance, VPC, security groups, and RDS Proxy
-// This stack is the foundation and must be deployed first
-const databaseStack = new DatabaseStack(app, `CiraInvoice-Database-${environment}`, {
-  ...stackProps,
-  config
-});
+// Only deployed when useExternalDatabase=false (e.g., staging/prod with RDS)
+// When useExternalDatabase=true (e.g., dev with Supabase), this stack is skipped
+let databaseStack: DatabaseStack | undefined;
+if (!config.useExternalDatabase) {
+  databaseStack = new DatabaseStack(app, `CiraInvoice-Database-${environment}`, {
+    ...stackProps,
+    config
+  });
+  console.log(`✓ Database Stack enabled for ${environment} (using AWS RDS)`);
+} else {
+  console.log(`✓ Database Stack skipped for ${environment} (using external database)`);
+  console.log(`  External DB URL: ${config.externalDatabaseUrl ? '(set from config)' : '(set from DATABASE_URL env var)'}`);
+}
 
 // 2. API Stack (Application Layer)
 // Creates Lambda functions, API Gateway, IAM roles, and API endpoints
-// Depends on database stack for VPC and database connection details
+// When using RDS: Depends on database stack for VPC and database connection details
+// When using external DB: No VPC dependencies, uses DATABASE_URL environment variable
 const apiStack = new ApiStack(app, `CiraInvoice-Api-${environment}`, {
   ...stackProps,
   config,
@@ -117,8 +126,12 @@ const monitoringStack = new MonitoringStack(app, `CiraInvoice-Monitoring-${envir
 // Explicit dependency declarations ensure proper deployment order and
 // prevent CloudFormation circular dependency errors
 
-apiStack.addDependency(databaseStack);           // API needs database VPC and endpoints
-workflowStack.addDependency(databaseStack);      // Workflow needs database for Lambda env vars
+// Only add database dependencies when RDS is being used
+if (databaseStack) {
+  apiStack.addDependency(databaseStack);           // API needs database VPC and endpoints
+  workflowStack.addDependency(databaseStack);      // Workflow needs database for Lambda env vars
+}
+
 workflowStack.addDependency(apiStack);           // Workflow needs Lambda functions for state machine
 monitoringStack.addDependency(apiStack);         // Monitoring needs API resources to monitor
 monitoringStack.addDependency(workflowStack);    // Monitoring needs workflow resources to monitor

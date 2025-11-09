@@ -14,8 +14,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@cira/shared": "*",
-    "@cira/database": "*",
+    "@cira/shared": "workspace:*",
+    "@cira/database": "workspace:*",
     "aws-sdk": "^2.1692.0"
   },
   "devDependencies": {

@@ -306,7 +306,7 @@ export class DatabaseClient implements IDatabaseClient {
       LIMIT ${limit}
     `;
     const result = await this.pool.query(query, values as any[]);
-    return result.rows.map(r => this.mapJob(r));
+    return result.rows.map((r: any) => this.mapJob(r));
   }
 
   async updateJobStatus(

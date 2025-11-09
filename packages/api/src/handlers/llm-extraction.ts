@@ -2,11 +2,13 @@
  * @fileoverview LLM Extraction Lambda Handler
  *
  * This module implements the final stage of the CIRA Invoice Processing System,
- * responsible for extracting structured data from OCR text using Azure OpenAI.
+ * responsible for extracting structured data from OCR text using Azure OpenAI
+ * with a two-stage extraction pipeline.
  *
  * Key Responsibilities:
  * - Retrieve OCR text from database (stored by OCR processing stage)
- * - Invoke Azure OpenAI for structured data extraction using AI SDK
+ * - Stage 1: Classify invoice type (general, insurance, utility, tax)
+ * - Stage 2: Extract type-specific structured fields using Azure OpenAI
  * - Validate extracted data against Zod schema
  * - Calculate confidence scores based on field weights
  * - Persist extraction results to database
@@ -15,26 +17,33 @@
  * Processing Flow:
  * 1. Validate input contains jobId and OCR metadata
  * 2. Load OCR text from database using jobId
- * 3. Extract structured data using InvoiceSchema and AI SDK
+ * 3. Two-stage extraction:
+ *    a. Classify invoice type using InvoiceTypeSchema
+ *    b. Extract structured data using InvoiceSchema with type context
  * 4. Validate extraction results and calculate confidence
- * 5. Persist results including token usage for cost tracking
+ * 5. Persist results including invoice type and token usage
  * 6. Return completion payload with metadata
  *
  * Integration Features:
+ * - Two-stage LLM extraction for improved accuracy
  * - Azure OpenAI integration via AI SDK v5
  * - Zod schema validation for type safety
+ * - Type-aware field extraction
  * - Weighted confidence calculation
- * - Token usage tracking for cost monitoring
+ * - Token usage tracking for cost monitoring (both stages)
  * - Comprehensive error handling and logging
  *
- * @version 1.0.0
+ * @version 2.0.0
  * @author CIRA Development Team
- * @since 2025-09-15
+ * @since 2025-10-01
  */
 
-import { extractStructured } from '../services/llm/client';
-import { InvoiceSchema } from '../services/llm/schemas/invoice';
+// IMPORTANT: Import instrumentation FIRST to initialize Langfuse before any other imports
+import '../instrumentation';
+
+import { extractInvoiceWithTypeDetection } from '../services/llm/client';
 import { DatabaseClient } from '@cira/database';
+import { flushSpans, langfuse } from '../instrumentation';
 
 /**
  * Returns current timestamp in milliseconds for performance measurement.
@@ -116,7 +125,7 @@ async function getDbCredentials() {
  *   jobId: 'uuid-here',
  *   ocr: { metadata: { provider: 'mistral', pages: 2 } }
  * });
- * // Returns: { jobId, status: 'llm_completed', result: {...}, metadata: {...} }
+ * // Returns: { jobId, status: 'llm_completed', result: { extractedData, invoiceType, confidence, tokensUsed }, metadata: {...} }
  * ```
  */
 export const handler = async (event: any) => {
@@ -139,6 +148,18 @@ export const handler = async (event: any) => {
     console.log(JSON.stringify(base));
   };
 
+  // Create top-level Langfuse trace for this Lambda invocation
+  const trace = langfuse?.trace({
+    name: 'invoice-llm-extraction',
+    userId: jobId,
+    sessionId: jobId,
+    metadata: {
+      ocrProvider: ocrMetadata?.provider,
+      ocrPages: ocrMetadata?.pages
+    },
+    tags: ['lambda', 'llm-extraction', 'invoice-processing']
+  });
+
   try {
     // Validate input contains { jobId, ocr: { metadata } }
     if (!jobId) {
@@ -150,13 +171,19 @@ export const handler = async (event: any) => {
       throw new Error('OCR metadata missing');
     }
 
-    // Load database configuration (matching OCR handler pattern)
-    const dbConfig: any = { ssl: true };
-    if (process.env['DATABASE_PROXY_ENDPOINT']) dbConfig.host = process.env['DATABASE_PROXY_ENDPOINT'];
-    if (process.env['DATABASE_NAME']) dbConfig.database = process.env['DATABASE_NAME'];
-    const creds = await getDbCredentials();
-    if (creds.user) dbConfig.user = creds.user;
-    if (creds.password) dbConfig.password = creds.password;
+    // Build database configuration
+    // Priority: DATABASE_URL (external DB like Supabase) > RDS with secrets
+    const dbConfig: any = process.env['DATABASE_URL']
+      ? { connectionString: process.env['DATABASE_URL'], ssl: { rejectUnauthorized: false } }
+      : await (async () => {
+          const creds = await getDbCredentials();
+          const config: any = { ssl: true };
+          if (process.env['DATABASE_PROXY_ENDPOINT']) config.host = process.env['DATABASE_PROXY_ENDPOINT'];
+          if (process.env['DATABASE_NAME']) config.database = process.env['DATABASE_NAME'];
+          if (creds.user) config.user = creds.user;
+          if (creds.password) config.password = creds.password;
+          return config;
+        })();
 
     const db = new DatabaseClient(dbConfig);
 
@@ -168,10 +195,8 @@ export const handler = async (event: any) => {
         throw new Error('No OCR text available');
       }
 
-      // Invoke AI SDK client with InvoiceExtractionSchema
-      const extractionResult = await extractStructured(InvoiceSchema, {
-        markdown: jobResult.rawOcrText
-      });
+      // Invoke two-stage extraction: classify type, then extract fields
+      const extractionResult = await extractInvoiceWithTypeDetection(jobResult.rawOcrText);
 
       // Validate extraction result (required fields present)
       if (!extractionResult.data) {
@@ -184,19 +209,21 @@ export const handler = async (event: any) => {
         jobId,
         extractedData: extractionResult.data,
         confidenceScore: extractionResult.confidence ?? null,
-        tokensUsed: extractionResult.tokensUsed ?? null
+        tokensUsed: extractionResult.totalTokensUsed ?? null
       });
 
-      const tokens = extractionResult.tokensUsed ?? null;
+      const tokens = extractionResult.totalTokensUsed ?? null;
       const confidence = extractionResult.confidence ?? null;
-      log({ decision: 'OK', tokens, confidence });
+      const invoiceType = extractionResult.invoiceType;
+      log({ decision: 'OK', invoiceType, tokens, confidence });
 
-      // Return { jobId, status: 'llm_completed', extractedData, confidence, tokensUsed }
-      return {
+      // Return { jobId, status: 'llm_completed', extractedData, invoiceType, confidence, tokensUsed }
+      const result = {
         jobId,
         status: 'llm_completed',
         result: {
           extractedData: extractionResult.data,
+          invoiceType,
           confidence,
           tokensUsed: tokens
         },
@@ -205,12 +232,52 @@ export const handler = async (event: any) => {
           ocrLength: jobResult.rawOcrText.length
         }
       };
+
+      // Update trace with success metadata
+      trace?.update({
+        output: {
+          status: 'llm_completed',
+          invoiceType,
+          confidence,
+          tokensUsed: tokens
+        },
+        metadata: {
+          processingTimeMs: now() - t0,
+          ocrTextLength: jobResult.rawOcrText.length,
+          invoiceType,
+          confidence
+        }
+      });
+
+      // Flush spans to Langfuse before returning (important for Lambda)
+      await flushSpans();
+
+      return result;
     } finally {
       await db.end();
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log({ decision: 'ERROR', message });
+
+    // Update trace with error information
+    trace?.update({
+      output: {
+        status: 'error',
+        error: message
+      },
+      metadata: {
+        processingTimeMs: now() - t0,
+        errorMessage: message,
+        level: 'ERROR'
+      }
+    });
+
+    // Flush spans even on error to capture error traces
+    await flushSpans().catch(() => {
+      // Ignore flush errors to avoid masking original error
+    });
+
     // On failure: throw typed error for Step Functions catch
     throw new Error(`LLM_EXTRACTION_ERROR: ${message}`);
   }

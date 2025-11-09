@@ -13,7 +13,7 @@ import { WorkflowStack } from './workflow-stack';
 export interface MonitoringStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
   apiStack: ApiStack;
-  databaseStack: DatabaseStack;
+  databaseStack?: DatabaseStack | undefined;  // Optional when using external database
   workflowStack: WorkflowStack;
 }
 
@@ -210,22 +210,24 @@ export class MonitoringStack extends cdk.Stack {
     });
     stepFunctionFailureAlarm.addAlarmAction(new cloudwatchActions.SnsAction(this.alarmTopic));
 
-    // Database connection alarms
-    const dbConnectionAlarm = new cloudwatch.Alarm(this, 'DbConnectionAlarm', {
-      metric: new cloudwatch.Metric({
-        namespace: 'AWS/RDS',
-        metricName: 'DatabaseConnections',
-        dimensionsMap: {
-          DBInstanceIdentifier: props.databaseStack.database.instanceIdentifier
-        },
-        period: cdk.Duration.minutes(5),
-        statistic: 'Average'
-      }),
-      threshold: 80, // 80% of max connections
-      evaluationPeriods: 2,
-      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING
-    });
-    dbConnectionAlarm.addAlarmAction(new cloudwatchActions.SnsAction(this.alarmTopic));
+    // Database connection alarms (only when using RDS)
+    if (props.databaseStack) {
+      const dbConnectionAlarm = new cloudwatch.Alarm(this, 'DbConnectionAlarm', {
+        metric: new cloudwatch.Metric({
+          namespace: 'AWS/RDS',
+          metricName: 'DatabaseConnections',
+          dimensionsMap: {
+            DBInstanceIdentifier: props.databaseStack.database.instanceIdentifier
+          },
+          period: cdk.Duration.minutes(5),
+          statistic: 'Average'
+        }),
+        threshold: 80, // 80% of max connections
+        evaluationPeriods: 2,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING
+      });
+      dbConnectionAlarm.addAlarmAction(new cloudwatchActions.SnsAction(this.alarmTopic));
+    }
 
     // Create a CloudWatch Dashboard
     const dashboard = new cloudwatch.Dashboard(this, 'InvoiceProcessingDashboard', {

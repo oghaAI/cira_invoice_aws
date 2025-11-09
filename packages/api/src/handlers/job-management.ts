@@ -134,12 +134,19 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
 
   log('info', 'Incoming request');
 
-  const creds = await getDbCredentials();
-  const dbConfig: any = { ssl: true };
-  if (process.env['DATABASE_PROXY_ENDPOINT']) dbConfig.host = process.env['DATABASE_PROXY_ENDPOINT'];
-  if (process.env['DATABASE_NAME']) dbConfig.database = process.env['DATABASE_NAME'];
-  if (creds.user) dbConfig.user = creds.user;
-  if (creds.password) dbConfig.password = creds.password;
+  // Build database configuration
+  // Priority: DATABASE_URL (external DB like Supabase) > RDS with secrets
+  const dbConfig: any = process.env['DATABASE_URL']
+    ? { connectionString: process.env['DATABASE_URL'], ssl: { rejectUnauthorized: false } }
+    : await (async () => {
+        const creds = await getDbCredentials();
+        const config: any = { ssl: true };
+        if (process.env['DATABASE_PROXY_ENDPOINT']) config.host = process.env['DATABASE_PROXY_ENDPOINT'];
+        if (process.env['DATABASE_NAME']) config.database = process.env['DATABASE_NAME'];
+        if (creds.user) config.user = creds.user;
+        if (creds.password) config.password = creds.password;
+        return config;
+      })();
   const db = new DatabaseClient(dbConfig);
 
   try {

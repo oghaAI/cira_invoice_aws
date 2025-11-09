@@ -10,7 +10,7 @@ import { DatabaseStack } from './database-stack';
 
 export interface WorkflowStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
-  databaseStack: DatabaseStack;
+  databaseStack?: DatabaseStack | undefined;  // Optional when using external database
   apiStack: ApiStack;
 }
 

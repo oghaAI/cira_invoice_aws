@@ -49,8 +49,8 @@ type DecisionCode =
 /** Maximum allowed PDF file size in bytes (15MB) to prevent memory exhaustion */
 const MAX_PDF_BYTES = 15 * 1024 * 1024; // 15MB
 
-/** Total timeout for PDF fetch operations in milliseconds (20 seconds) */
-const TOTAL_TIMEOUT_MS = 20_000; // ~20s
+/** Total timeout for PDF fetch operations in milliseconds (45 seconds) */
+const TOTAL_TIMEOUT_MS = 45_000; // ~45s
 
 /**
  * Returns current timestamp in milliseconds for performance measurement.
@@ -144,41 +144,56 @@ async function fetchWithTimeout(url: string, timeoutMs: number, signal?: AbortSi
       signal.addEventListener('abort', () => combined.abort(signal.reason), { once: true });
     }
     // @ts-ignore - Node 20 global fetch
-    const res: Response = await fetch(url, { method: 'GET', signal: combined?.signal ?? controller.signal });
+    const res: Response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'CIRA-Invoice-Processor/1.0',
+        'Accept': 'application/pdf,*/*',
+        'Accept-Encoding': 'identity'
+      },
+      signal: combined?.signal ?? controller.signal
+    });
     return res;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function fetchWithRetry(url: string, totalTimeoutMs: number): Promise<{ response?: Response; retries: number }>
+async function fetchWithRetry(url: string, totalTimeoutMs: number): Promise<{ response?: Response; retries: number; lastError?: string }>
 {
   const start = now();
   let attempt = 0;
-  const backoffMs = 250;
+  const maxAttempts = 3;
+  let lastError: string | undefined;
 
-  while (attempt < 2) {
+  while (attempt < maxAttempts) {
     const remaining = Math.max(0, totalTimeoutMs - (now() - start));
     if (remaining === 0) break;
+
     try {
       const res = await fetchWithTimeout(url, remaining);
       // Retry only on 5xx
-      if (res.status >= 500 && res.status <= 599 && attempt === 0) {
+      if (res.status >= 500 && res.status <= 599 && attempt < maxAttempts - 1) {
         attempt++;
+        // Exponential backoff: 250ms, 500ms, 1000ms
+        const backoffMs = 250 * Math.pow(2, attempt - 1);
         await new Promise(r => setTimeout(r, Math.min(backoffMs, remaining)));
         continue;
       }
       return { response: res, retries: attempt };
     } catch (e) {
-      if (attempt === 0) {
+      lastError = e instanceof Error ? e.message : String(e);
+      if (attempt < maxAttempts - 1) {
         attempt++;
+        // Exponential backoff: 250ms, 500ms, 1000ms
+        const backoffMs = 250 * Math.pow(2, attempt - 1);
         await new Promise(r => setTimeout(r, Math.min(backoffMs, remaining)));
         continue;
       }
       break;
     }
   }
-  return { retries: 1 };
+  return { retries: attempt, lastError: lastError || undefined };
 }
 
 async function consumeBodyWithLimit(body: ReadableStream<Uint8Array> | null, limit: number): Promise<number> {
@@ -288,10 +303,10 @@ export const handler = async (event: any) => {
     }
 
     // Fetch with timeout+retry (GET)
-    const { response, retries } = await fetchWithRetry(pdfUrl, TOTAL_TIMEOUT_MS);
+    const { response, retries, lastError } = await fetchWithRetry(pdfUrl, TOTAL_TIMEOUT_MS);
     if (!response) {
-      log('NETWORK_ERROR', { retries });
-      return { statusCode: 504, error_code: 'NETWORK_ERROR', message: 'Network failure or timeout', retries };
+      log('NETWORK_ERROR', { retries, error_message: lastError });
+      return { statusCode: 504, error_code: 'NETWORK_ERROR', message: lastError || 'Network failure or timeout', retries };
     }
 
     // Do not retry on 4xx
@@ -360,12 +375,19 @@ export const handler = async (event: any) => {
       const pagesInt = Number.isFinite((ocr.metadata as any).pages)
         ? Math.max(0, Math.trunc((ocr.metadata as any).pages as number))
         : null;
-      const creds = await getDbCredentials();
-      const dbConfig: any = { ssl: true };
-      if (process.env['DATABASE_PROXY_ENDPOINT']) dbConfig.host = process.env['DATABASE_PROXY_ENDPOINT'];
-      if (process.env['DATABASE_NAME']) dbConfig.database = process.env['DATABASE_NAME'];
-      if (creds.user) dbConfig.user = creds.user;
-      if (creds.password) dbConfig.password = creds.password;
+      // Build database configuration
+      // Priority: DATABASE_URL (external DB like Supabase) > RDS with secrets
+      const dbConfig: any = process.env['DATABASE_URL']
+        ? { connectionString: process.env['DATABASE_URL'], ssl: { rejectUnauthorized: false } }
+        : await (async () => {
+            const creds = await getDbCredentials();
+            const config: any = { ssl: true };
+            if (process.env['DATABASE_PROXY_ENDPOINT']) config.host = process.env['DATABASE_PROXY_ENDPOINT'];
+            if (process.env['DATABASE_NAME']) config.database = process.env['DATABASE_NAME'];
+            if (creds.user) config.user = creds.user;
+            if (creds.password) config.password = creds.password;
+            return config;
+          })();
       const db = new DatabaseClient(dbConfig);
       try {
         await db.upsertJobResult({

@@ -1,0 +1,159 @@
+{
+    "jobId": "0f9b19a4-caa8-438c-8119-35643f95b745",
+    "status": "llm_completed",
+    "result": {
+      "extractedData": {
+        "invoice_date": {
+          "value": "2024-06-02",
+          "reason_code": "explicit_label",
+          "evidence_snippet": "INVOICE DATE Jun 02, 2024",
+          "confidence": "high"
+        },
+        "invoice_due_date": {
+          "value": null,
+          "reasoning": "Due date is non-date text",
+          "reason_code": "missing",
+          "evidence_snippet": "PAYMENT TERMS Upon receipt",
+          "confidence": "low",
+          "assumptions": [
+            "Due date is non-date text"
+          ]
+        },
+        "invoice_number": {
+          "value": "1659",
+          "reason_code": "explicit_label",
+          "evidence_snippet": "INVOICE #1659",
+          "confidence": "high"
+        },
+        "account_number": {
+          "value": null,
+          "reasoning": "No account number listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No account number listed"
+          ]
+        },
+        "vendor_name": {
+          "value": "Andres Lawn Salon",
+          "reason_code": "explicit_label",
+          "evidence_snippet": "Andres Lawn Salon",
+          "confidence": "high"
+        },
+        "community_name": {
+          "value": null,
+          "reasoning": "Multiple properties listed, unclear which is primary",
+          "reason_code": "missing",
+          "evidence_snippet": "Summerlin Homeowners Association",
+          "confidence": "low",
+          "assumptions": [
+            "Community name not explicitly labeled"
+          ]
+        },
+        "payment_remittance_entity": {
+          "value": null,
+          "reasoning": "No remittance entity listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No remittance entity listed"
+          ]
+        },
+        "payment_remittance_entity_care_of": {
+          "value": null,
+          "reasoning": "No remittance care of listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No remittance care of listed"
+          ]
+        },
+        "payment_remittance_address": {
+          "value": null,
+          "reasoning": "No remittance address listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No remittance address listed"
+          ]
+        },
+        "reasoning": {
+          "value": "Multiple properties listed, unclear which is primary",
+          "reason_code": "inferred_layout",
+          "evidence_snippet": "Summerlin Homeowners Association, Andres Lawn Salon",
+          "confidence": "medium"
+        },
+        "invoice_past_due_amount": {
+          "value": null,
+          "reasoning": "No past due amount listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No past due amount listed"
+          ]
+        },
+        "invoice_current_due_amount": {
+          "value": null,
+          "reasoning": "No explicit label for current charges",
+          "reason_code": "missing",
+          "evidence_snippet": "Ongoing maintenance for June 2024 $1,900.00",
+          "confidence": "low",
+          "assumptions": [
+            "No explicit label for current charges"
+          ]
+        },
+        "total_amount_due": {
+          "value": 5050,
+          "reason_code": "explicit_label",
+          "evidence_snippet": "AMOUNT DUE $5,050.00",
+          "confidence": "high"
+        },
+        "invoice_late_fee_amount": {
+          "value": null,
+          "reasoning": "No late fee amount listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No late fee amount listed"
+          ]
+        },
+        "credit_amount": {
+          "value": null,
+          "reasoning": "No credit amount listed",
+          "reason_code": "missing",
+          "evidence_snippet": "",
+          "confidence": "low",
+          "assumptions": [
+            "No credit amount listed"
+          ]
+        },
+        "valid_input": {
+          "value": true,
+          "reason_code": "explicit_label",
+          "evidence_snippet": "INVOICE #1659, AMOUNT DUE $5,050.00",
+          "confidence": "high"
+        },
+        "invoice_type": {
+          "value": "general",
+          "confidence": "high",
+          "reason_code": "explicit_label",
+          "reasoning": "Determined via dedicated classification stage"
+        }
+      },
+      "invoiceType": "general",
+      "confidence": 0.5000000000000001,
+      "tokensUsed": 4531
+    },
+    "metadata": {
+      "processingTime": 8284,
+      "ocrLength": 910
+    }
+  }
+
+  {"role":"assistant","content":"{\n  \"invoice_number\": {\n    \"value\": \"INV-2024-00008642\",\n    \"confidence\": \"high\",\n    \"reason_code\": \"explicit_label\",\n    \"evidence_snippet\": \"INVOICE NUMBER | INV-2024-00008642\"\n  },\n  \"invoice_date\": {\n    \"value\": \"2024-06-02\",\n    \"confidence\": \"high\",\n    \"reason_code\": \"explicit_label\",\n    \"evidence_snippet\": \"INVOICE DATE | 06/02/2024\"\n  },\n  \"invoice_due_date\": {\n    \"value\": \"2024-07-02\",\n    \"confidence\": \"high\",\n    \"reason_code\": \"explicit_label\",\n    \"evidence_snippet\": \"INVOICE DUE DATE | 07/02/2024\"\n  },\n  \"invoice_current_due_amount\": {\n    \"value\": 56.93,\n    \"confidence\": \"medium\",\n    \"reason_code\": \"nearby_header\",\n    \"evidence_snippet\": \"TOTAL | $56.93\"\n  },\n  \"total_amount_due\": {\n    \"value\": 56.93,\n    \"confidence\": \"medium\",\n    \"reason_code\": \"nearby_header\",\n    \"evidence_snippet\": \"TOTAL | $56.93\"\n  },\n  \"community_name\": {\n    \"value\": \"City of Alexandria\",\n    \"confidence\": \"medium\",\n    \"reason_code\": \"nearby_header\",\n    \"evidence_snippet\": \"# INVOICE (INV-2024-00008642)\\n\\nFOR CITY OF ALEXANDRIA VA\",\n    \"reasoning\": \"Community name inferred from header\",\n    \"assumptions\": [\"Community name is in header\"]\n  },\n  \"vendor_name\": {\n    \"value\": \"City of Alexandria\",\n    \"confidence\": \"medium\",\n    \"reason_code\": \"nearby_header\",\n    \"evidence_snippet\": \"# INVOICE (INV-2024-00008642)\\n\\nFOR CITY OF ALEXANDRIA VA\",\n    \"reasoning\": \"Vendor name inferred from header\",\n    \"assumptions\": [\"Vendor name is in header\"]\n  },\n  \"payment_remittance_entity\": {\n    \"value\": \"Code Administration\",\n    \"confidence\": \"medium\",\n    \"reason_code\": \"nearby_header\",\n    \"evidence_snippet\": \"REMITTANCE INFORMATION | Code Administration\"\n  },\n  \"payment_remittance_address\": {\n    \"value\": \"301 King Street Room 4200, Alexandria, VA 22314\",\n    \"confidence\": \"medium\",\n    \"reason_code\": \"nearby_header\",\n    \"evidence_snippet\": \"301 King Street Room 4200\\nAlexandria, VA 22314\"\n  },\n  \"valid_input\": {\n    \"value\": true,\n    \"confidence\": \"high\",\n    \"reason_code\": \"explicit_label\"\n  },\n  \"reasoning\": {\n    \"value\": \"Document is a valid invoice with clear vendor and total amount\",\n    \"confidence\": \"high\",\n    \"reason_code\": \"explicit_label\"\n  }\n}"}

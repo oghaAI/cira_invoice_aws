@@ -14,7 +14,21 @@ export interface EnvironmentConfig {
   /** Environment name (dev, staging, prod) */
   environment: string;
 
-  /** PostgreSQL RDS configuration */
+  /**
+   * Use external PostgreSQL database (e.g., Supabase) instead of AWS RDS
+   * When true: RDS stack is not deployed, Lambda uses DATABASE_URL from environment
+   * When false: RDS stack is deployed, Lambda uses RDS Proxy endpoint
+   */
+  useExternalDatabase: boolean;
+
+  /**
+   * External database connection string (optional, only used when useExternalDatabase=true)
+   * Example: postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres
+   * If not set here, must be provided via DATABASE_URL environment variable
+   */
+  externalDatabaseUrl?: string | undefined;
+
+  /** PostgreSQL RDS configuration (only used when useExternalDatabase=false) */
   database: {
     /** RDS instance class (e.g., db.t3.micro for dev, db.r5.large for prod) */
     instanceClass: string;
@@ -77,8 +91,11 @@ export function getConfig(environment: string): EnvironmentConfig {
   switch (environment) {
     case 'dev':
       // Development environment: Minimal cost, maximum observability
+      // Uses external database (Supabase) by default to avoid RDS costs
       return {
         environment: 'dev',
+        useExternalDatabase: process.env['USE_EXTERNAL_DATABASE'] !== 'false', // Default to true for dev
+        externalDatabaseUrl: process.env['DATABASE_URL'],
         database: {
           instanceClass: 'db.t3.micro',         // Burstable performance, low cost
           allocatedStorage: 20,                 // Minimal storage for development
@@ -103,8 +120,11 @@ export function getConfig(environment: string): EnvironmentConfig {
 
     case 'staging':
       // Staging environment: Production-like, cost-optimized for testing
+      // Uses RDS by default, can be overridden with USE_EXTERNAL_DATABASE=true
       return {
         environment: 'staging',
+        useExternalDatabase: process.env['USE_EXTERNAL_DATABASE'] === 'true', // Default to false for staging
+        externalDatabaseUrl: process.env['DATABASE_URL'],
         database: {
           instanceClass: 'db.t3.small',        // Small production-like instance
           allocatedStorage: 50,                // Moderate storage for testing data
@@ -130,8 +150,11 @@ export function getConfig(environment: string): EnvironmentConfig {
 
     case 'prod':
       // Production environment: High availability, performance, compliance
+      // Always uses RDS for production (external database not recommended)
       return {
         environment: 'prod',
+        useExternalDatabase: false, // Always use RDS for production
+        externalDatabaseUrl: undefined,
         database: {
           instanceClass: 'db.r5.large',        // Memory-optimized for production workload
           allocatedStorage: 100,               // Substantial storage for production data

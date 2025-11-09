@@ -11,7 +11,7 @@ import { DatabaseStack } from './database-stack';
 
 export interface ApiStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
-  databaseStack: DatabaseStack;
+  databaseStack?: DatabaseStack | undefined;  // Optional when using external database
 }
 
 export class ApiStack extends cdk.Stack {
@@ -24,31 +24,47 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    // Create security group for Lambda functions
-    const lambdaSecurityGroup = new ec2.SecurityGroup(this, 'LambdaSecurityGroup', {
-      vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
-      description: 'Security group for Lambda functions',
-      allowAllOutbound: true
-    });
+    // Determine if we're using RDS or external database
+    const useRDS = !!props.databaseStack;
 
-    // Database security group already allows VPC CIDR access
-    // No need to add specific Lambda SG rule since Lambda functions are in the same VPC
+    // Lambda security group (only needed for VPC mode with RDS)
+    let lambdaSecurityGroup: ec2.SecurityGroup | undefined;
+    if (useRDS) {
+      lambdaSecurityGroup = new ec2.SecurityGroup(this, 'LambdaSecurityGroup', {
+        vpc: props.databaseStack!.vpc as unknown as ec2.IVpc,
+        description: 'Security group for Lambda functions',
+        allowAllOutbound: true
+      });
+    }
 
     // Create environment variables for Lambda functions
-    const lambdaEnvironment = {
-      DATABASE_PROXY_ENDPOINT: props.databaseStack.databaseProxy.endpoint,
-      DATABASE_SECRET_ARN: props.databaseStack.database.secret!.secretArn,
-      DATABASE_NAME: 'cira_invoice'
-    };
+    // Two modes: RDS (with proxy endpoint and secrets) or External DB (with connection string)
+    const lambdaEnvironment: Record<string, string> = useRDS
+      ? {
+          // RDS mode: Use RDS Proxy endpoint and Secrets Manager
+          DATABASE_PROXY_ENDPOINT: props.databaseStack!.databaseProxy.endpoint,
+          DATABASE_SECRET_ARN: props.databaseStack!.database.secret!.secretArn,
+          DATABASE_NAME: 'cira_invoice'
+        }
+      : {
+          // External DB mode: Use connection string from env or config
+          DATABASE_URL: props.config.externalDatabaseUrl || process.env['DATABASE_URL'] || '',
+          DATABASE_NAME: 'cira_invoice'
+        };
 
     // Create IAM role for Lambda functions
     const lambdaRole = new iam.Role(this, 'LambdaExecutionRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaVPCAccessExecutionRole')]
+      // Only use VPC execution role if Lambda is in VPC (RDS mode)
+      managedPolicies: useRDS
+        ? [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaVPCAccessExecutionRole')]
+        : [iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole')]
     });
 
-    // Grant Lambda access to RDS secrets
-    props.databaseStack.database.secret!.grantRead(lambdaRole);
+    // Grant Lambda access to RDS secrets (only in RDS mode)
+    if (useRDS) {
+      props.databaseStack!.database.secret!.grantRead(lambdaRole);
+    }
 
     // Allow Job Management Lambda to start Step Functions executions without
     // creating a cross-stack reference to the specific State Machine ARN.
@@ -62,24 +78,36 @@ export class ApiStack extends cdk.Stack {
       })
     );
 
-    // Job Management Lambda Function
-    this.jobManagementFunction = new lambdaNodejs.NodejsFunction(this, 'JobManagementFunction', {
+    // Common Lambda configuration
+    const commonLambdaConfig: Partial<lambdaNodejs.NodejsFunctionProps> = {
       runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'handler',
-      entry: '../api/src/handlers/job-management.ts',
-      environment: lambdaEnvironment,
-      vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-      },
-      securityGroups: [lambdaSecurityGroup],
       role: lambdaRole,
-      timeout: cdk.Duration.minutes(15),
-      memorySize: 512,
-      // reservedConcurrentExecutions: 10, // Commented out due to account limits
       bundling: {
         externalModules: ['aws-sdk']
       }
+    };
+
+    // VPC configuration (only for RDS mode)
+    const vpcConfig: Partial<lambdaNodejs.NodejsFunctionProps> = useRDS
+      ? {
+          vpc: props.databaseStack!.vpc as unknown as ec2.IVpc,
+          vpcSubnets: {
+            subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+          },
+          securityGroups: [lambdaSecurityGroup!]
+        }
+      : {};
+
+    // Job Management Lambda Function
+    this.jobManagementFunction = new lambdaNodejs.NodejsFunction(this, 'JobManagementFunction', {
+      ...commonLambdaConfig,
+      ...vpcConfig,
+      handler: 'handler',
+      entry: '../api/src/handlers/job-management.ts',
+      environment: lambdaEnvironment,
+      timeout: cdk.Duration.minutes(15),
+      memorySize: 512
+      // reservedConcurrentExecutions: 10, // Commented out due to account limits
     });
 
     // OCR Processing Lambda Function
@@ -101,72 +129,64 @@ export class ApiStack extends cdk.Stack {
     if (process.env['OCR_DEBUG']) ocrEnv['OCR_DEBUG'] = process.env['OCR_DEBUG'] as string;
 
     this.ocrProcessingFunction = new lambdaNodejs.NodejsFunction(this, 'OcrProcessingFunction', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      ...commonLambdaConfig,
+      ...vpcConfig,
       handler: 'handler',
       entry: '../api/src/handlers/ocr-processing.ts',
       environment: ocrEnv,
-      vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-      },
-      securityGroups: [lambdaSecurityGroup],
-      role: lambdaRole,
       timeout: cdk.Duration.minutes(15),
-      memorySize: 1024,
-      bundling: {
-        externalModules: ['aws-sdk']
-      }
+      memorySize: 1024
     });
 
     // LLM Extraction Lambda Function
+    const llmEnv: Record<string, string> = {
+      ...lambdaEnvironment,
+      // Azure-hosted model configuration (supports both new and legacy envs)
+      AZURE_API_ENDPOINT:
+        process.env['AZURE_API_ENDPOINT'] ?? process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
+      AZURE_API_KEY: process.env['AZURE_API_KEY'] ?? process.env['AZURE_OPENAI_API_KEY'] ?? '',
+      AZURE_MODEL: process.env['AZURE_MODEL'] ?? process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
+      AZURE_OPENAI_API_VERSION: process.env['AZURE_OPENAI_API_VERSION'] ?? '2024-08-01-preview'
+    };
+
+    // Add Langfuse tracing configuration if provided
+    if (process.env['LANGFUSE_PUBLIC_KEY']) {
+      llmEnv['LANGFUSE_PUBLIC_KEY'] = process.env['LANGFUSE_PUBLIC_KEY'];
+    }
+    if (process.env['LANGFUSE_SECRET_KEY']) {
+      llmEnv['LANGFUSE_SECRET_KEY'] = process.env['LANGFUSE_SECRET_KEY'];
+    }
+    if (process.env['LANGFUSE_HOST']) {
+      llmEnv['LANGFUSE_HOST'] = process.env['LANGFUSE_HOST'];
+    }
+
     this.llmExtractionFunction = new lambdaNodejs.NodejsFunction(this, 'LlmExtractionFunction', {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      ...commonLambdaConfig,
+      ...vpcConfig,
       handler: 'handler',
       entry: '../api/src/handlers/llm-extraction.ts',
-      environment: {
-        ...lambdaEnvironment,
-        // Azure-hosted model configuration (supports both new and legacy envs)
-        AZURE_API_ENDPOINT:
-          process.env['AZURE_API_ENDPOINT'] ?? process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
-        AZURE_API_KEY: process.env['AZURE_API_KEY'] ?? process.env['AZURE_OPENAI_API_KEY'] ?? '',
-        AZURE_MODEL: process.env['AZURE_MODEL'] ?? process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
-        AZURE_OPENAI_API_VERSION: process.env['AZURE_OPENAI_API_VERSION'] ?? '2024-08-01-preview'
-      },
-      vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-      },
-      securityGroups: [lambdaSecurityGroup],
-      role: lambdaRole,
+      environment: llmEnv,
       timeout: cdk.Duration.minutes(15),
-      memorySize: 1024,
-      bundling: {
-        externalModules: ['aws-sdk']
-      }
+      memorySize: 1024
     });
 
     // One-off DB migration function (invoke manually post-deploy)
-    this.dbMigrateFunction = new lambdaNodejs.NodejsFunction(this, 'DbMigrateFunction', {
-      runtime: lambda.Runtime.NODEJS_20_X,
-      handler: 'handler',
-      entry: path.resolve(__dirname, '../../src/migrations/run-schema.ts'),
-      environment: {
-        SECRET_ARN: props.databaseStack.database.secret!.secretArn,
-        DB_HOST: props.databaseStack.database.instanceEndpoint.hostname,
-        DB_NAME: 'cira_invoice'
-      },
-      vpc: props.databaseStack.vpc as unknown as ec2.IVpc,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-      },
-      securityGroups: [lambdaSecurityGroup],
-      role: lambdaRole,
-      timeout: cdk.Duration.minutes(5),
-      memorySize: 256,
-      bundling: {
-        externalModules: ['aws-sdk']
-      }
-    });
+    // Only create this function when using RDS (not needed for external database)
+    if (useRDS) {
+      this.dbMigrateFunction = new lambdaNodejs.NodejsFunction(this, 'DbMigrateFunction', {
+        ...commonLambdaConfig,
+        ...vpcConfig,
+        handler: 'handler',
+        entry: path.resolve(__dirname, '../../src/migrations/run-schema.ts'),
+        environment: {
+          SECRET_ARN: props.databaseStack!.database.secret!.secretArn,
+          DB_HOST: props.databaseStack!.database.instanceEndpoint.hostname,
+          DB_NAME: 'cira_invoice'
+        },
+        timeout: cdk.Duration.minutes(5),
+        memorySize: 256
+      });
+    }
 
     // Create REST API (API Gateway V1) to support API Keys and Usage Plans
     this.api = new apigateway.RestApi(this, 'CiraInvoiceApi', {
@@ -256,9 +276,12 @@ export class ApiStack extends cdk.Stack {
       description: 'LLM Extraction Lambda Function ARN'
     });
 
-    new cdk.CfnOutput(this, 'DbMigrateFunctionArn', {
-      value: this.dbMigrateFunction.functionArn,
-      description: 'DB Migration Lambda Function ARN (invoke once post-deploy)'
-    });
+    // Only output DB migration function ARN when using RDS
+    if (this.dbMigrateFunction) {
+      new cdk.CfnOutput(this, 'DbMigrateFunctionArn', {
+        value: this.dbMigrateFunction.functionArn,
+        description: 'DB Migration Lambda Function ARN (invoke once post-deploy)'
+      });
+    }
   }
 }

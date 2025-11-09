@@ -30,8 +30,12 @@ import type { ChatMessage } from '../client';
  * Builds optimized chat messages for invoice data extraction from OCR markdown.
  *
  * This function creates a carefully structured conversation that guides the LLM
- * to extract invoice data accurately while following the InvoiceSchema structure.
+ * to extract invoice data accurately while following the provided schema structure.
  * The prompt emphasizes factual extraction and proper handling of missing data.
+ *
+ * Note: The schema passed to the LLM is type-specific and only contains relevant fields
+ * for the invoice type. This function doesn't need to know the invoice type because
+ * the schema itself already constrains which fields can be extracted.
  *
  * Prompt Design Features:
  * - System message establishes extraction principles and guidelines
@@ -46,7 +50,8 @@ import type { ChatMessage } from '../client';
  * @example
  * ```typescript
  * const messages = buildInvoiceExtractionPrompt(ocrMarkdown);
- * const result = await callLlm({ messages, schema: InvoiceSchema });
+ * // Schema passed separately determines which fields are extracted
+ * const result = await callLlm({ messages, schema: typeSpecificSchema });
  * ```
  */
 export function buildInvoiceExtractionPrompt(markdown: string): ChatMessage[] {

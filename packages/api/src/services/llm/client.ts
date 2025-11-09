@@ -32,6 +32,8 @@ import { createAzure as createAzureCustom } from '@quail-ai/azure-ai-provider';
 
 import { generateObject } from 'ai';
 
+import { langfuse } from '../../instrumentation.js';
+
 /**
  * Categories of LLM errors for proper error handling and retry logic.
  * Each category maps to specific HTTP status codes and retry strategies.
@@ -250,6 +252,10 @@ export type CallLlmOptions<T> = {
   timeoutMs?: number;
   /** Maximum number of retry attempts (default: 2) */
   maxRetries?: number;
+  /** Name for the Langfuse generation span (e.g., 'type-classification', 'field-extraction') */
+  generationName?: string;
+  /** Metadata to attach to the Langfuse generation span */
+  metadata?: Record<string, any>;
 };
 
 /**
@@ -323,6 +329,22 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
   const attempts = [500, 1000, 2000, 4000, 4000];
   let attempt = 0;
 
+  // Create Langfuse generation span if client is available
+  const generation = langfuse?.generation({
+    name: opts.generationName || 'llm-call',
+    model: modelId,
+    modelParameters: {
+      provider: providerName,
+      maxTokens: 4096
+    },
+    input: opts.messages,
+    metadata: {
+      ...opts.metadata,
+      timeoutMs,
+      maxRetries
+    }
+  });
+
   while (true) {
     // Each attempt uses an AbortController to enforce the per-call timeout
     const controller = new AbortController();
@@ -338,6 +360,21 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
         messages: opts.messages as any,
         schema: opts.schema,
         signal: controller.signal,
+        /**
+         * Set maximum output tokens to ensure the model has enough capacity to generate
+         * complete JSON responses for complex schemas with multiple nested fields.
+         *
+         * Invoice extraction generates large JSON objects with:
+         * - 17-21 fields (depending on invoice type)
+         * - Each field has 6 nested properties (value, confidence, reason_code, etc.)
+         * - Total ~100+ individual values in the response
+         *
+         * 4096 tokens provides ample room for:
+         * - Complete field extraction (~2000-3000 tokens)
+         * - Evidence snippets and reasoning text
+         * - Buffer for formatting and structure
+         */
+        maxTokens: 4096,
         experimental_transform: {
           // Clean up markdown-wrapped JSON if LLM ignores instructions
           response: (text: string) => {
@@ -354,6 +391,18 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
       clearTimeout(timer);
       const durationMs = Date.now() - t0;
       const usage = result.usage as any;
+
+      // Update Langfuse generation with success data
+      generation?.end({
+        output: result.object,
+        usage: {
+          promptTokens: usage?.promptTokens,
+          completionTokens: usage?.completionTokens,
+          totalTokens: usage?.totalTokens
+        },
+        statusMessage: 'success'
+      });
+
       // Log request/response previews for observability without dumping full bodies
       log({
         provider: providerName,
@@ -404,6 +453,17 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
           attempt++;
           continue;
         }
+        // Record error in Langfuse before returning
+        generation?.end({
+          level: 'ERROR',
+          statusMessage: `${err.category}: ${err.message}`,
+          metadata: {
+            errorCategory: err.category,
+            statusCode: err.statusCode,
+            requestId: err.requestId,
+            attemptsMade: attempt + 1
+          }
+        });
         return { success: false, error: err, durationMs: Date.now() - t0 };
       }
       // Unknown error, try to map HTTPish status if present
@@ -423,6 +483,15 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
         attempt++;
         continue;
       }
+      // Record error in Langfuse before returning
+      generation?.end({
+        level: 'ERROR',
+        statusMessage: `${wrapped.category}: ${wrapped.message}`,
+        metadata: {
+          errorCategory: wrapped.category,
+          attemptsMade: attempt + 1
+        }
+      });
       return { success: false, error: wrapped, durationMs: Date.now() - t0 };
     }
   }
@@ -521,6 +590,175 @@ export async function extractStructured<T>(
   };
 }
 
+/**
+ * Result of two-stage invoice extraction with type classification.
+ */
+export interface InvoiceExtractionWithTypeResult<T> extends ExtractStructuredResult<T> {
+  /** Classified invoice type from first stage */
+  invoiceType: string;
+  /** Total tokens used across both stages */
+  totalTokensUsed?: number;
+}
+
+/**
+ * Two-stage invoice extraction with type classification.
+ *
+ * This function implements a two-stage LLM extraction pipeline:
+ * 1. Stage 1: Classify invoice type (general, insurance, utility, tax)
+ * 2. Stage 2: Extract fields using type-specific schema
+ *
+ * The type classification determines which schema is used in stage 2, ensuring
+ * only relevant fields are extracted. This approach:
+ * - Reduces token usage by using smaller, focused schemas
+ * - Prevents hallucination on irrelevant fields
+ * - Provides stronger validation and type safety
+ * - Makes extraction more deterministic
+ *
+ * @param {string} markdown - OCR-extracted markdown text from invoice document
+ * @param {ExtractStructuredOptions} options - Optional configuration for confidence weights
+ * @returns {Promise<InvoiceExtractionWithTypeResult<T>>} Extraction results with invoice type
+ *
+ * @example
+ * ```typescript
+ * const result = await extractInvoiceWithTypeDetection(ocrText);
+ * console.log(`Type: ${result.invoiceType}, Confidence: ${result.confidence}`);
+ * // For insurance: extracts vendor fields + policy_start_date, policy_end_date, policy_number, service_termination
+ * // For general: extracts only vendor fields
+ * ```
+ */
+export async function extractInvoiceWithTypeDetection(
+  markdown: string,
+  options?: ExtractStructuredOptions
+): Promise<InvoiceExtractionWithTypeResult<any>> {
+  // Stage 1: Classify invoice type
+  const { InvoiceTypeSchema } = await import('./schemas/invoice-type.js');
+  const { buildInvoiceTypeClassificationPrompt } = await import('./prompts/invoice-type.js');
+
+  const typeMessages = buildInvoiceTypeClassificationPrompt(markdown);
+  const typeResult = await callLlm({
+    messages: typeMessages,
+    schema: InvoiceTypeSchema,
+    timeoutMs: 30000, // 30 seconds for classification
+    maxRetries: 2,
+    generationName: 'invoice-type-classification',
+    metadata: {
+      stage: 'type-detection',
+      inputLength: markdown.length
+    }
+  });
+
+  if (!typeResult.success) {
+    throw typeResult.error;
+  }
+
+  const invoiceType = typeResult.data.invoice_type;
+  const typeTokens = typeResult.usage?.totalTokens ?? 0;
+
+  // Stage 2: Build type-specific schema and extract invoice data
+  const { buildInvoiceSchemaForType } = await import('./schemas/invoice.js');
+
+  /**
+   * Select the appropriate type-specific prompt builder based on classified invoice type.
+   *
+   * Type-specific prompts provide significant advantages over a unified prompt:
+   *
+   * 1. Token Efficiency: Each prompt only includes rules for relevant fields, reducing
+   *    prompt size by ~25-30% compared to a unified prompt containing all type rules.
+   *    This reduces both cost and latency for LLM API calls.
+   *
+   * 2. Improved LLM Focus: By presenting only applicable field extraction rules, the
+   *    LLM can focus on the task without distraction from irrelevant field guidance.
+   *    This reduces cognitive load and improves extraction quality.
+   *
+   * 3. Lower Hallucination Risk: Excluding rules for fields that aren't in the schema
+   *    prevents the LLM from attempting to extract or reason about irrelevant fields,
+   *    reducing the chance of confusing similar fields across types.
+   *
+   * 4. Per-Type Optimization: Each prompt can be independently tuned and improved
+   *    based on performance metrics for that specific invoice type without affecting
+   *    extraction quality for other types.
+   *
+   * 5. Clearer Instructions: Type-specific terminology and examples make the extraction
+   *    task clearer. E.g., insurance prompts use "policy period" vs "service period"
+   *    vs "tax year" terminology appropriate to each domain.
+   *
+   * Prompt Selection Strategy:
+   * - general: Standard vendor invoices (17 base fields only)
+   * - insurance: Vendor fields + policy_start_date, policy_end_date, policy_number, service_termination
+   * - utility: Vendor fields + service_start_date, service_end_date, service_termination
+   * - tax: Vendor fields + tax_year, property_id
+   *
+   * The prompt builder functions all return ChatMessage[] with identical structure,
+   * differing only in the field-specific extraction rules included in the system message.
+   */
+  const promptBuilders = {
+    general: async () => {
+      const { buildGeneralInvoicePrompt } = await import('./prompts/invoice-general.js');
+      return buildGeneralInvoicePrompt(markdown);
+    },
+    insurance: async () => {
+      const { buildInsuranceInvoicePrompt } = await import('./prompts/invoice-insurance.js');
+      return buildInsuranceInvoicePrompt(markdown);
+    },
+    utility: async () => {
+      const { buildUtilityInvoicePrompt } = await import('./prompts/invoice-utility.js');
+      return buildUtilityInvoicePrompt(markdown);
+    },
+    tax: async () => {
+      const { buildTaxInvoicePrompt } = await import('./prompts/invoice-tax.js');
+      return buildTaxInvoicePrompt(markdown);
+    }
+  };
+
+  // Create schema with only relevant fields for this invoice type
+  const typeSpecificSchema = buildInvoiceSchemaForType(invoiceType);
+
+  /**
+   * Dynamically load and execute the appropriate prompt builder for this invoice type.
+   * This ensures we only load the prompt module we need, keeping bundle size minimal.
+   */
+  const extractMessages = await promptBuilders[invoiceType]();
+  const extractResult = await callLlm({
+    messages: extractMessages,
+    schema: typeSpecificSchema,
+    timeoutMs: 60000, // 60 seconds for extraction
+    maxRetries: 3,
+    generationName: 'invoice-field-extraction',
+    metadata: {
+      stage: 'field-extraction',
+      invoiceType,
+      inputLength: markdown.length
+    }
+  });
+
+  if (!extractResult.success) {
+    throw extractResult.error;
+  }
+
+  const extractTokens = extractResult.usage?.totalTokens ?? 0;
+  const normalizedData = normalizeExtractedData(extractResult.data);
+
+  // Inject invoice_type into the extracted data with high confidence
+  // since it was determined in a separate classification stage
+  const dataWithType = {
+    ...normalizedData,
+    invoice_type: {
+      value: invoiceType,
+      confidence: 'high' as const,
+      reason_code: 'explicit_label' as const,
+      reasoning: 'Determined via dedicated classification stage'
+    }
+  };
+
+  return {
+    invoiceType,
+    data: dataWithType,
+    tokensUsed: extractTokens,
+    totalTokensUsed: typeTokens + extractTokens,
+    confidence: calculateWeightedConfidence(dataWithType, options?.confidenceWeights)
+  };
+}
+
 function clipString(value: string, max = 2000): string {
   if (typeof value !== 'string') return '';
   return value.length > max ? `${value.slice(0, max)}…` : value;
@@ -594,12 +832,12 @@ function calculateWeightedConfidence<T>(data: T, weights?: ConfidenceWeights): n
   // Default weights
   const defaultWeights: Required<ConfidenceWeights> = {
     amounts: 0.3,
-    dates: 0.25,
+    dates: 0.1,
     identifiers: 0.2,
-    addresses: 0.1,
-    names: 0.1,
-    validation: 0.05,
-    default: 0.1
+    addresses: 0.05,
+    names: 0.3,
+    validation: 0,
+    default: 0.05
   };
 
   const finalWeights = { ...defaultWeights, ...weights };

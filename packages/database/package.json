@@ -24,7 +24,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@cira/shared": "*",
+    "@cira/shared": "workspace:*",
     "drizzle-orm": "^0.44.5",
     "pg": "^8.13.0",
     "decimal.js": "^10.4.3"
