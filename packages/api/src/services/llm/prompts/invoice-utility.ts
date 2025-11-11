@@ -111,7 +111,7 @@ import {
 export const UTILITY_SPECIFIC_RULES = `- Utility-specific field extraction:
   - service_start_date: Look for "Service Period Start", "Service Period From", "Billing Period From", "Usage Period Start", "Period Beginning". This is when utility consumption began for this billing cycle, NOT the invoice date.
   - service_end_date: Look for "Service Period End", "Service Period To", "Billing Period To", "Usage Period End", "Period Ending". This is when utility consumption ended for this billing cycle.
-  - service_termination: Set to true if document indicates service disconnection or account closure. Look for "Final Bill", "Service Disconnection", "Account Closed", "Service Terminated", "Disconnect Notice", "Final Statement". Set to false if no termination indicators present. Set to null if unclear.
+  - service_termination: Set to true if document indicates service disconnection or account closure. Look for "Service terminating", "Service Disconnection", "Disconnect Notice". Set to false if no termination indicators present. Set to null if unclear.
 
 - Service period disambiguation:
   - Service period (service_start_date, service_end_date) defines when utilities were consumed - the usage/billing period.

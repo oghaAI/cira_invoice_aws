@@ -403,3 +403,409 @@ This file contains detailed logs of all batch processing runs.
 | 4146339 | 69ed319e... | ✅ completed | general | - |
 | 4146538 | 7d143064... | ✅ completed | general | - |
 
+
+---
+
+## Run: 2025-11-09T04:52:51.360Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 1
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 91
+- Processed: 1
+- ✅ Completed: 1
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 28.4s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4147281 | 5f3ef7d5... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-09T04:58:45.876Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 1
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 91
+- Processed: 1
+- ✅ Completed: 1
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 30.0s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4147283 | 47f7174e... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-09T14:12:18.337Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 10
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 82
+- Processed: 10
+- ✅ Completed: 8
+- ❌ Failed: 2
+- ⏱️ Timeout: 0
+- Duration: 295.5s
+- Success Rate: 80.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4202999 | 80bf07de... | ✅ completed | general | - |
+| 4202190 | 7d1f8566... | ✅ completed | general | - |
+| 4203256 | e24f6e99... | ✅ completed | general | - |
+| 4147288 | 44dc3124... | ✅ completed | general | - |
+| 4203320 | 0fdc0177... | ✅ completed | general | - |
+| 4203678 | 684efabc... | ✅ completed | general | - |
+| 4203345 | dae1cebc... | ✅ completed | general | - |
+| 4253813 | 461b4793... | ✅ completed | general | - |
+| 4203296 | 7dd1e135... | ❌ failed | - | - |
+| 4253826 | 92959e7f... | ❌ failed | - | - |
+
+
+---
+
+## Run: 2025-11-09T14:53:14.354Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 1
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 91
+- Processed: 1
+- ✅ Completed: 0
+- ❌ Failed: 1
+- ⏱️ Timeout: 0
+- Duration: 68.4s
+- Success Rate: 0.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4203296 | 36684d0a... | ❌ failed | - | - |
+
+
+---
+
+## Run: 2025-11-09T15:00:48.822Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 1
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 91
+- Processed: 1
+- ✅ Completed: 1
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 31.7s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4203296 | 1514b2d4... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-09T15:02:32.560Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 10
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 82
+- Processed: 10
+- ✅ Completed: 7
+- ❌ Failed: 3
+- ⏱️ Timeout: 0
+- Duration: 91.5s
+- Success Rate: 70.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4254263 | f6db5a4d... | ❌ failed | - | - |
+| 4254264 | 9ff1507c... | ❌ failed | - | - |
+| 4253826 | 61faf858... | ✅ completed | general | - |
+| 4254265 | aefe421e... | ❌ failed | - | - |
+| 4253828 | dd00e6e2... | ✅ completed | general | - |
+| 4254427 | 0c8932ab... | ✅ completed | general | - |
+| 4254450 | 48cca2e9... | ✅ completed | general | - |
+| 4300771 | c337c2b1... | ✅ completed | general | - |
+| 4300773 | d56bfd75... | ✅ completed | general | - |
+| 4300794 | 7709dac0... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-10T06:20:34.519Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 10
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 82
+- Processed: 10
+- ✅ Completed: 7
+- ❌ Failed: 3
+- ⏱️ Timeout: 0
+- Duration: 126.5s
+- Success Rate: 70.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4300825 | e6a72b26... | ✅ completed | general | - |
+| 4300806 | 02f64674... | ✅ completed | general | - |
+| 4300801 | 49062fbd... | ✅ completed | general | - |
+| 4300863 | 0604f39a... | ❌ failed | - | - |
+| 4300907 | 1f4df677... | ❌ failed | - | - |
+| 4300893 | 5009d624... | ✅ completed | general | - |
+| 4359022 | d6176a30... | ✅ completed | general | - |
+| 4359077 | cf7e0b88... | ✅ completed | general | - |
+| 4359207 | fb25e0aa... | ✅ completed | general | - |
+| 4359141 | 0be4ca8d... | ❌ failed | - | - |
+
+
+---
+
+## Run: 2025-11-10T11:33:49.065Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 1
+
+**Summary:**
+- Total in input: 80
+- Skipped (already processed): 79
+- Processed: 1
+- ✅ Completed: 1
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 26.9s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4147274 | 2c45141d... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-10T14:20:39.193Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 1
+
+**Summary:**
+- Total in input: 80
+- Skipped (already processed): 79
+- Processed: 1
+- ✅ Completed: 1
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 30.2s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4147278 | ce91bf6d... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-10T18:31:33.286Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 10
+
+**Summary:**
+- Total in input: 80
+- Skipped (already processed): 70
+- Processed: 10
+- ✅ Completed: 10
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 150.8s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4100211 | f9106921... | ✅ completed | general | - |
+| 4359880 | c511af6a... | ✅ completed | general | - |
+| 4253880 | f69e6f7c... | ✅ completed | general | - |
+| 4732494 | 2358b1d6... | ✅ completed | utility | - |
+| 4406086 | 0b884f07... | ✅ completed | general | - |
+| 4100309 | 5c61cbc2... | ✅ completed | utility | - |
+| 4100219 | 480c6d0a... | ✅ completed | general | - |
+| 4673296 | 7d7ea7d5... | ✅ completed | general | - |
+| 4300766 | 7b989663... | ✅ completed | general | - |
+| 4359163 | 80394d1b... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-10T18:32:59.881Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 30
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 62
+- Processed: 30
+- ✅ Completed: 0
+- ❌ Failed: 30
+- ⏱️ Timeout: 0
+- Duration: 26.5s
+- Success Rate: 0.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4359715 | 3285021c... | ❌ error | - | Failed to get status: 500... |
+| 4359358 | 9b706382... | ❌ error | - | Failed to get status: 500... |
+| 4406408 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4405999 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4462880 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4462919 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4462931 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4462928 | b57d5825... | ❌ error | - | Failed to get status: 500... |
+| 4463144 | 66f89c95... | ❌ error | - | Failed to get status: 500... |
+| 4463235 | e319c0c6... | ❌ error | - | Failed to get status: 500... |
+| 4563026 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563112 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4515727 | ea826c01... | ❌ error | - | Failed to get status: 500... |
+| 4563148 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563257 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4359360 | fceec660... | ❌ error | - | Failed to get status: 500... |
+| 4563536 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563548 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563336 | 17a13b9a... | ❌ error | - | Failed to get status: 500... |
+| 4563525 | 8f50bfbe... | ❌ error | - | Failed to get status: 500... |
+| 4563559 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563602 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4564329 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4565017 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616720 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616791 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616840 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616847 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616790 | 128ed0ad... | ❌ error | - | Failed to get status: 500... |
+| 4617857 | b1356645... | ❌ error | - | Failed to get status: 500... |
+
+
+---
+
+## Run: 2025-11-10T18:33:00.992Z
+
+**Configuration:**
+- Concurrency: 3
+- Timeout: 300000ms
+- Limit: 30
+
+**Summary:**
+- Total in input: 80
+- Skipped (already processed): 50
+- Processed: 30
+- ✅ Completed: 0
+- ❌ Failed: 30
+- ⏱️ Timeout: 0
+- Duration: 39.9s
+- Success Rate: 0.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4563602 | 730a1b84... | ❌ error | - | Failed to get status: 500... |
+| 4100306 | 5091c8a9... | ❌ error | - | Failed to get status: 500... |
+| 4202823 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563536 | 9ec17ff8... | ❌ error | - | Failed to get status: 500... |
+| 4563548 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563559 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4255298 | bed91a83... | ❌ error | - | Failed to get status: 500... |
+| 4563525 | 910d2aa5... | ❌ error | - | Failed to get status: 500... |
+| 4563257 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4410107 | e753dbb4... | ❌ error | - | Failed to get status: 500... |
+| 4300769 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4563272 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4565017 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4565135 | 62f4e536... | ❌ error | - | Failed to get status: 500... |
+| 4410096 | bece2b1a... | ❌ error | - | Failed to get status: 500... |
+| 4099817 | f178a851... | ❌ error | - | Failed to get status: 500... |
+| 4565145 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616801 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4616791 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4406409 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4673440 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4673639 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4147533 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4203372 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4203374 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4203403 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4731847 | ecc20939... | ❌ error | - | Failed to get status: 500... |
+| 4515483 | N/A | ❌ error | - | Failed to create job: 500 {"message":"Internal ser... |
+| 4203385 | ce60afea... | ❌ error | - | Failed to get status: 500... |
+| 4515484 | eb47811f... | ❌ error | - | Failed to get status: 500... |
+

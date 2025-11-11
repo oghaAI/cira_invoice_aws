@@ -11,7 +11,7 @@ import { DatabaseStack } from './database-stack';
 
 export interface ApiStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
-  databaseStack?: DatabaseStack | undefined;  // Optional when using external database
+  databaseStack?: DatabaseStack | undefined; // Optional when using external database
 }
 
 export class ApiStack extends cdk.Stack {
@@ -123,9 +123,11 @@ export class ApiStack extends cdk.Stack {
       OCR_RETRIEVAL_MAX_BYTES: process.env['OCR_RETRIEVAL_MAX_BYTES'] ?? '262144'
     };
     if (process.env['MISTRAL_OCR_MODE']) ocrEnv['MISTRAL_OCR_MODE'] = process.env['MISTRAL_OCR_MODE'] as string;
-    if (process.env['MISTRAL_OCR_SYNC_PATH']) ocrEnv['MISTRAL_OCR_SYNC_PATH'] = process.env['MISTRAL_OCR_SYNC_PATH'] as string;
+    if (process.env['MISTRAL_OCR_SYNC_PATH'])
+      ocrEnv['MISTRAL_OCR_SYNC_PATH'] = process.env['MISTRAL_OCR_SYNC_PATH'] as string;
     if (process.env['MISTRAL_OCR_MODEL']) ocrEnv['MISTRAL_OCR_MODEL'] = process.env['MISTRAL_OCR_MODEL'] as string;
-    if (process.env['MISTRAL_INCLUDE_IMAGE_BASE64']) ocrEnv['MISTRAL_INCLUDE_IMAGE_BASE64'] = process.env['MISTRAL_INCLUDE_IMAGE_BASE64'] as string;
+    if (process.env['MISTRAL_INCLUDE_IMAGE_BASE64'])
+      ocrEnv['MISTRAL_INCLUDE_IMAGE_BASE64'] = process.env['MISTRAL_INCLUDE_IMAGE_BASE64'] as string;
     if (process.env['OCR_DEBUG']) ocrEnv['OCR_DEBUG'] = process.env['OCR_DEBUG'] as string;
 
     this.ocrProcessingFunction = new lambdaNodejs.NodejsFunction(this, 'OcrProcessingFunction', {
@@ -142,8 +144,7 @@ export class ApiStack extends cdk.Stack {
     const llmEnv: Record<string, string> = {
       ...lambdaEnvironment,
       // Azure-hosted model configuration (supports both new and legacy envs)
-      AZURE_API_ENDPOINT:
-        process.env['AZURE_API_ENDPOINT'] ?? process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
+      AZURE_API_ENDPOINT: process.env['AZURE_API_ENDPOINT'] ?? process.env['AZURE_OPENAI_ENDPOINT'] ?? '',
       AZURE_API_KEY: process.env['AZURE_API_KEY'] ?? process.env['AZURE_OPENAI_API_KEY'] ?? '',
       AZURE_MODEL: process.env['AZURE_MODEL'] ?? process.env['AZURE_OPENAI_DEPLOYMENT'] ?? '',
       AZURE_OPENAI_API_VERSION: process.env['AZURE_OPENAI_API_VERSION'] ?? '2024-08-01-preview'

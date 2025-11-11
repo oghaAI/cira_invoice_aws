@@ -211,10 +211,10 @@ export const DATE_SANITY_RULES = `- Date sanity:
  * prevents the LLM from guessing when it shouldn't.
  */
 export const CONFIDENCE_GUIDANCE = `- Confidence guidance:
-  - high: explicit label next to the value (e.g., "Invoice Date", "Due Date", "Total Due").
+  - high: explicit label next to the value (e.g., "Invoice Date", "Due Date", "Total Due") OR field is clearly absent from the invoice (high confidence it's null).
   - medium: nearby header/context supports the value but not explicitly labeled.
-  - low: competing candidates or weak cues (set value to null if ambiguous).
-  - If a field is missing or ambiguous, set its value to null (or [] for lists) and confidence to "low". Do not invent values.`;
+  - low: competing candidates, weak cues, or uncertain about which value is correct (set value to null if ambiguous).
+  - If a field is clearly missing from the invoice, set value to null with confidence="high" and reason_code="missing". If ambiguous or uncertain, set value to null with confidence="low" and include evidence_snippet. Do not invent values.`;
 
 /**
  * Emission policy for optional metadata fields.

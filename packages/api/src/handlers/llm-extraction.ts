@@ -215,7 +215,23 @@ export const handler = async (event: any) => {
       const tokens = extractionResult.totalTokensUsed ?? null;
       const confidence = extractionResult.confidence ?? null;
       const invoiceType = extractionResult.invoiceType;
-      log({ decision: 'OK', invoiceType, tokens, confidence });
+      const perFieldConfidence = extractionResult.perFieldConfidence;
+      
+      // Log overall confidence and summary of per-field confidence
+      const lowConfidenceFields = perFieldConfidence
+        ? Object.entries(perFieldConfidence)
+            .filter(([_, score]) => score < 0.5)
+            .map(([field]) => field)
+        : [];
+      
+      log({
+        decision: 'OK',
+        invoiceType,
+        tokens,
+        confidence,
+        lowConfidenceFields: lowConfidenceFields.length > 0 ? lowConfidenceFields : undefined,
+        perFieldConfidenceCount: perFieldConfidence ? Object.keys(perFieldConfidence).length : 0
+      });
 
       // Return { jobId, status: 'llm_completed', extractedData, invoiceType, confidence, tokensUsed }
       const result = {

@@ -26,6 +26,7 @@
     "bcrypt": "^6.0.0",
     "dotenv": "^17.2.2",
     "hono": "^4.9.6",
+    "jsonrepair": "^3.12.0",
     "zod": "^4.1.5"
   },
   "devDependencies": {

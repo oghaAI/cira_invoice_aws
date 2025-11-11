@@ -58,11 +58,11 @@ const ReasonedField = <T>(valueSchema: z.ZodType<T>) =>
       /** The extracted value of the specified type */
       value: valueSchema,
       /** Explanation (optional). Keep concise; do not include chain-of-thought. */
-      reasoning: z.string().max(120).nullable().optional(),
+      reasoning: z.string().nullable().optional(),
       /** Categorical reason for selection (optional) */
       reason_code: z.enum(['explicit_label', 'nearby_header', 'inferred_layout', 'conflict', 'missing']).optional(),
       /** Short evidence excerpt from source text (optional) */
-      evidence_snippet: z.string().max(80).nullable().optional(),
+      evidence_snippet: z.string().nullable().optional(),
       /** Confidence level for this extraction */
       confidence: z.enum(['low', 'medium', 'high']).nullable().optional().default('low'),
       /** Optional assumptions made during extraction */
@@ -302,25 +302,13 @@ export const INVOICE_TYPE_FIELDS = {
   ] as const,
 
   // Insurance-specific fields (in addition to vendor fields)
-  insurance: [
-    'policy_start_date',
-    'policy_end_date',
-    'policy_number',
-    'service_termination'
-  ] as const,
+  insurance: ['policy_start_date', 'policy_end_date', 'policy_number', 'service_termination'] as const,
 
   // Utility-specific fields (in addition to vendor fields)
-  utility: [
-    'service_start_date',
-    'service_end_date',
-    'service_termination'
-  ] as const,
+  utility: ['service_start_date', 'service_end_date', 'service_termination'] as const,
 
   // Tax-specific fields (in addition to vendor fields)
-  tax: [
-    'tax_year',
-    'property_id'
-  ] as const
+  tax: ['tax_year', 'property_id'] as const
 } as const;
 
 /**

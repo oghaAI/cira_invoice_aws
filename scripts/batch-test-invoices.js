@@ -7,10 +7,10 @@
  * and generates a comprehensive results CSV with all extracted fields.
  *
  * Usage:
- *   node scripts/batch-test-invoices.js [--concurrency 3] [--timeout 300000]
+ *   node scripts/batch-test-invoices.js [--type community] [--concurrency 3] [--timeout 300000] [--limit 0]
  *
- * Input:  verifications/community/community_list.csv
- * Output: verifications/community/results.csv
+ * Input:  verifications/{type}/{type}_list.csv
+ * Output: verifications/{type}/results_*.csv (split by invoice type)
  */
 
 const fs = require('fs');
@@ -21,8 +21,9 @@ const http = require('http');
 // Configuration
 const API_ENDPOINT = process.env.API_ENDPOINT || 'https://nldl5jl1x6.execute-api.us-east-1.amazonaws.com/dev';
 const API_KEY = process.env.API_KEY || 'Mwaf64Bevy7Jl7ynOtsCK2St9GHpqHbya3Ct2HVs';
-const INPUT_CSV = path.join(__dirname, '../verifications/community/community_list.csv');
-const OUTPUT_DIR = path.join(__dirname, '../verifications/community');
+const TYPE = process.argv.find(arg => arg.startsWith('--type'))?.split('=')[1] || 'community';
+const INPUT_CSV = path.join(__dirname, `../verifications/${TYPE}/${TYPE}_list.csv`);
+const OUTPUT_DIR = path.join(__dirname, `../verifications/${TYPE}`);
 const OUTPUT_FILES = {
   general: path.join(OUTPUT_DIR, 'results_general.csv'),
   insurance: path.join(OUTPUT_DIR, 'results_insurance.csv'),
@@ -452,6 +453,7 @@ async function processWithConcurrency(jobs, concurrency) {
  */
 async function main() {
   console.log('=== Batch Invoice Testing ===\n');
+  console.log(`Type: ${TYPE}`);
   console.log(`API Endpoint: ${API_ENDPOINT}`);
   console.log(`Concurrency: ${CONCURRENCY}`);
   console.log(`Timeout: ${TIMEOUT_MS}ms`);

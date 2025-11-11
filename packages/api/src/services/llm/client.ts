@@ -30,7 +30,8 @@ import { z } from 'zod';
 import { createAzure as createAzureOpenAI } from '@ai-sdk/azure';
 import { createAzure as createAzureCustom } from '@quail-ai/azure-ai-provider';
 
-import { generateObject } from 'ai';
+import { generateObject, NoObjectGeneratedError } from 'ai';
+import { jsonrepair } from 'jsonrepair';
 
 import { langfuse } from '../../instrumentation.js';
 
@@ -38,7 +39,14 @@ import { langfuse } from '../../instrumentation.js';
  * Categories of LLM errors for proper error handling and retry logic.
  * Each category maps to specific HTTP status codes and retry strategies.
  */
-export type LlmErrorCategory = 'VALIDATION' | 'AUTH' | 'QUOTA' | 'TIMEOUT' | 'SERVER' | 'FAILED_STATUS';
+export type LlmErrorCategory =
+  | 'VALIDATION'
+  | 'AUTH'
+  | 'QUOTA'
+  | 'TIMEOUT'
+  | 'SERVER'
+  | 'FAILED_STATUS'
+  | 'SCHEMA_VALIDATION';
 
 /**
  * Custom error class for LLM-related operations with detailed categorization.
@@ -234,6 +242,40 @@ function log(fields: Record<string, unknown>) {
 }
 
 /**
+ * Attempts to repair malformed JSON using the jsonrepair library.
+ * The jsonrepair library handles many edge cases including:
+ * - Missing quotes around keys
+ * - Single quotes instead of double quotes
+ * - Trailing commas
+ * - Comments
+ * - Code blocks
+ * - Missing closing braces/brackets
+ * - And many more malformed JSON patterns
+ *
+ * @param text - The malformed JSON text to repair
+ * @returns The repaired text (or original if repair fails)
+ */
+function repairJsonText(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  try {
+    // Use jsonrepair library for comprehensive JSON repair
+    const repaired = jsonrepair(text.trim());
+    return repaired;
+  } catch (err) {
+    // If jsonrepair cannot repair the text, return original
+    // This will allow the error to propagate with full details
+    log({
+      status: 'jsonrepair_failed',
+      error: err instanceof Error ? err.message : String(err),
+      textLength: text.length,
+      textPreview: clipUnknown(text, 500)
+    });
+    return text;
+  }
+}
+
+/**
  * Simplified chat message interface for text-only prompts.
  * Used for building conversation context for structured generation.
  */
@@ -386,6 +428,20 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
             }
             return text;
           }
+        },
+        experimental_repairText: async ({ text, error: _error }) => {
+          // Attempt to repair malformed JSON when parsing/validation fails
+          const repaired = repairJsonText(text);
+          log({
+            provider: providerName,
+            model: modelId,
+            attempt,
+            status: 'repair_attempt',
+            originalTextLength: text.length,
+            repairedTextLength: repaired.length,
+            repairApplied: repaired !== text
+          });
+          return repaired;
         }
       });
       clearTimeout(timer);
@@ -424,6 +480,79 @@ export async function callLlm<T = unknown>(opts: CallLlmOptions<T>): Promise<Cal
     } catch (e) {
       clearTimeout(timer);
       let caught: unknown = e;
+
+      // Handle NoObjectGeneratedError specifically with detailed logging
+      if (NoObjectGeneratedError.isInstance(caught)) {
+        const noObjError = caught as NoObjectGeneratedError;
+        const usage = noObjError.usage as any;
+
+        // Log comprehensive error details
+        log({
+          provider: providerName,
+          model: modelId,
+          attempt,
+          status: 'no_object_generated',
+          errorType: 'NoObjectGeneratedError',
+          text: clipUnknown(noObjError.text, 5000), // Log generated text (may be malformed JSON)
+          textLength: noObjError.text?.length ?? 0,
+          response: {
+            id: noObjError.response?.id,
+            timestamp: noObjError.response?.timestamp,
+            modelId: noObjError.response?.modelId
+          },
+          usage: {
+            promptTokens: usage?.promptTokens,
+            completionTokens: usage?.completionTokens,
+            totalTokens: usage?.totalTokens
+          },
+          cause:
+            noObjError.cause instanceof Error
+              ? {
+                  name: noObjError.cause.name,
+                  message: noObjError.cause.message,
+                  stack: noObjError.cause.stack?.split('\n').slice(0, 5).join('\n') // First 5 lines of stack
+                }
+              : String(noObjError.cause)
+        });
+
+        // Update Langfuse generation with error details
+        const langfuseEndOptions: any = {
+          level: 'ERROR',
+          statusMessage: 'NoObjectGeneratedError: response did not match schema',
+          output: {
+            error: 'NoObjectGeneratedError',
+            textPreview: clipUnknown(noObjError.text, 1000),
+            cause: noObjError.cause instanceof Error ? noObjError.cause.message : String(noObjError.cause)
+          },
+          metadata: {
+            errorType: 'NoObjectGeneratedError',
+            textLength: noObjError.text?.length ?? 0,
+            responseId: noObjError.response?.id,
+            attemptsMade: attempt + 1
+          }
+        };
+
+        // Add usage if available
+        if (usage) {
+          langfuseEndOptions.usage = {
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            totalTokens: usage.totalTokens
+          };
+        }
+
+        generation?.end(langfuseEndOptions);
+
+        // Create a categorized error for consistent error handling
+        const schemaError = new LlmError({
+          message: `No object generated: response did not match schema. Cause: ${noObjError.cause instanceof Error ? noObjError.cause.message : String(noObjError.cause)}`,
+          category: 'SCHEMA_VALIDATION',
+          provider: providerName
+        });
+
+        // Don't retry schema validation errors - they're unlikely to succeed on retry
+        return { success: false, error: schemaError, durationMs: Date.now() - t0 };
+      }
 
       // If the AI SDK exposes request/response bodies on error, capture short previews
       if (caught && typeof caught === 'object') {
@@ -527,6 +656,12 @@ export interface ExtractStructuredOptions {
 }
 
 /**
+ * Per-field confidence score mapping.
+ * Maps field names to their calculated confidence scores (0-1).
+ */
+export type PerFieldConfidence = Record<string, number>;
+
+/**
  * Result of structured extraction with data, tokens, and confidence.
  */
 export type ExtractStructuredResult<T> = {
@@ -534,8 +669,10 @@ export type ExtractStructuredResult<T> = {
   data: T;
   /** Total tokens used for cost tracking */
   tokensUsed?: number | undefined;
-  /** Calculated confidence score (0-1) */
+  /** Overall calculated confidence score (0-1) - weighted average of all fields */
   confidence?: number | undefined;
+  /** Per-field confidence scores (0-1) for each extracted field */
+  perFieldConfidence?: PerFieldConfidence | undefined;
 };
 
 /**
@@ -583,10 +720,18 @@ export async function extractStructured<T>(
   // coerce numeric-looking amount strings to numbers).
   const normalizedData = normalizeExtractedData(result.data as T);
 
+  // Extract invoice type if available (for type-specific required fields)
+  const invoiceType = (normalizedData as any)?.invoice_type?.value;
+
+  // Calculate confidence scores (both overall and per-field)
+  // Pass invoice type to only penalize missing required fields for that type
+  const confidenceResult = calculateWeightedConfidence(normalizedData, options?.confidenceWeights, invoiceType);
+
   return {
     data: normalizedData,
     tokensUsed: result.usage?.totalTokens,
-    confidence: calculateWeightedConfidence(normalizedData, options?.confidenceWeights)
+    confidence: confidenceResult.overall,
+    perFieldConfidence: confidenceResult.perField
   };
 }
 
@@ -750,12 +895,17 @@ export async function extractInvoiceWithTypeDetection(
     }
   };
 
+  // Calculate confidence scores (both overall and per-field)
+  // Pass invoice type to only penalize missing required fields for that type
+  const confidenceResult = calculateWeightedConfidence(dataWithType, options?.confidenceWeights, invoiceType);
+
   return {
     invoiceType,
     data: dataWithType,
     tokensUsed: extractTokens,
     totalTokensUsed: typeTokens + extractTokens,
-    confidence: calculateWeightedConfidence(dataWithType, options?.confidenceWeights)
+    confidence: confidenceResult.overall,
+    perFieldConfidence: confidenceResult.perField
   };
 }
 
@@ -818,56 +968,233 @@ function getFieldCategory(fieldName: string): keyof ConfidenceWeights {
   return 'default';
 }
 
-function calculateWeightedConfidence<T>(data: T, weights?: ConfidenceWeights): number {
+/**
+ * Calculates a numeric confidence score (0-1) for a single field using both
+ * confidence level and reason_code. The reason_code provides additional
+ * context that refines the confidence score beyond the basic high/medium/low mapping.
+ *
+ * Scoring Strategy:
+ * - Base score from confidence level (high=0.9, medium=0.6, low=0.3)
+ * - Adjustments based on reason_code:
+ *   - explicit_label: Boost by 5% (most reliable)
+ *   - nearby_header: Keep base score (good context)
+ *   - inferred_layout: Reduce by 10% (less reliable)
+ *   - conflict: Heavy penalty (50% reduction) - indicates uncertainty
+ *   - missing: Zero score (no data available)
+ *
+ * @param {string | null | undefined} confidence - Field confidence level ('high' | 'medium' | 'low')
+ * @param {string | undefined} reasonCode - Extraction method reason code
+ * @returns {number} Numeric confidence score between 0 and 1
+ *
+ * @example
+ * ```typescript
+ * // High confidence with explicit label = highest score
+ * calculateFieldConfidenceScore('high', 'explicit_label') // ~0.945
+ *
+ * // High confidence but inferred = lower score
+ * calculateFieldConfidenceScore('high', 'inferred_layout') // ~0.81
+ *
+ * // Conflict always gets heavy penalty
+ * calculateFieldConfidenceScore('medium', 'conflict') // ~0.3
+ * ```
+ */
+function calculateFieldConfidenceScore(confidence: string | null | undefined, reasonCode?: string): number {
+  // Base score from confidence level
+  let baseScore = 0;
+  if (confidence === 'high') baseScore = 0.9;
+  else if (confidence === 'medium') baseScore = 0.6;
+  else if (confidence === 'low') baseScore = 0.3;
+  else return 0; // null/undefined confidence = 0
+
+  // Adjust based on reason_code
+  if (reasonCode === 'explicit_label') {
+    // Explicit labels are most reliable - small boost
+    return Math.min(1.0, baseScore * 1.05);
+  } else if (reasonCode === 'nearby_header') {
+    // Nearby header is good context - keep base score
+    return baseScore;
+  } else if (reasonCode === 'inferred_layout') {
+    // Inferred from layout is less reliable - reduce score
+    return baseScore * 0.9;
+  } else if (reasonCode === 'conflict') {
+    // Conflicts indicate uncertainty - heavy penalty
+    return baseScore * 0.5;
+  } else if (reasonCode === 'missing') {
+    // Missing field = no confidence
+    return 0;
+  }
+
+  // If reason_code is not provided or unknown, use base score
+  // (fallback for backward compatibility)
+  return baseScore;
+}
+
+/**
+ * Required fields for each invoice type.
+ * Only missing REQUIRED fields should penalize overall confidence.
+ * Optional fields that are missing should not affect the score.
+ */
+const REQUIRED_FIELDS_BY_TYPE: Record<string, readonly string[]> = {
+  general: [
+    'vendor_name', // Who issued the invoice
+    'total_amount_due', // How much to pay
+    'invoice_date', // When invoice was issued
+    'valid_input' // Must be true for valid invoice
+  ] as const,
+  insurance: [
+    'vendor_name',
+    'total_amount_due',
+    'invoice_date',
+    'valid_input',
+    'policy_number', // Insurance-specific: policy identifier
+    'policy_start_date', // Insurance-specific: coverage start
+    'policy_end_date' // Insurance-specific: coverage end
+  ] as const,
+  utility: [
+    'vendor_name',
+    'total_amount_due',
+    'invoice_date',
+    'valid_input',
+    'service_start_date', // Utility-specific: service period start
+    'service_end_date' // Utility-specific: service period end
+  ] as const,
+  tax: [
+    'vendor_name',
+    'total_amount_due',
+    'invoice_date',
+    'valid_input',
+    'tax_year', // Tax-specific: assessment year
+    'property_id' // Tax-specific: property identifier
+  ] as const
+};
+
+/**
+ * Gets the list of required fields for a given invoice type.
+ * Falls back to general requirements if type is unknown.
+ */
+function getRequiredFieldsForType(invoiceType: string): string[] {
+  const fields = REQUIRED_FIELDS_BY_TYPE[invoiceType];
+  if (fields) {
+    return [...fields];
+  }
+  // Fallback to general fields (guaranteed to exist)
+  const generalFields = REQUIRED_FIELDS_BY_TYPE['general'];
+  if (!generalFields) {
+    // This should never happen, but TypeScript needs this check
+    return ['vendor_name', 'total_amount_due', 'invoice_date', 'valid_input'];
+  }
+  return [...generalFields];
+}
+
+/**
+ * Result of confidence calculation including both overall and per-field scores.
+ */
+export interface ConfidenceCalculationResult {
+  /** Overall weighted confidence score (0-1) */
+  overall: number;
+  /** Per-field confidence scores (0-1) */
+  perField: PerFieldConfidence;
+}
+
+function calculateWeightedConfidence<T>(
+  data: T,
+  weights?: ConfidenceWeights,
+  invoiceType?: string
+): ConfidenceCalculationResult {
   /**
-   * Compute a single confidence score (0..1) as a weighted average of
-   * per-field confidence levels. Field-level confidences are mapped from
-   * strings → numeric scores (high=0.9, medium=0.6, low=0.3).
+   * Compute both overall and per-field confidence scores using weighted average.
+   * Field-level scores are calculated using both confidence level AND reason_code
+   * to provide more accurate assessment of extraction quality.
+   *
+   * Key Strategy:
+   * - Calculate per-field confidence scores for ALL fields
+   * - Only REQUIRED fields (based on invoice type) contribute to overall score
+   * - Missing optional fields don't penalize the overall confidence
+   * - Missing required fields significantly reduce overall confidence
    *
    * Weights can be customized per category; defaults emphasize monetary
    * amounts and dates as generally more critical in invoices.
    */
-  if (!data || typeof data !== 'object') return 0;
+  const perFieldConfidence: PerFieldConfidence = {};
+
+  if (!data || typeof data !== 'object') {
+    return { overall: 0, perField: perFieldConfidence };
+  }
+
+  // Determine required fields based on invoice type
+  const requiredFields: string[] = invoiceType
+    ? getRequiredFieldsForType(invoiceType)
+    : getRequiredFieldsForType('general');
 
   // Default weights
   const defaultWeights: Required<ConfidenceWeights> = {
     amounts: 0.3,
-    dates: 0.1,
+    dates: 0.25,
     identifiers: 0.2,
-    addresses: 0.05,
-    names: 0.3,
-    validation: 0,
-    default: 0.05
+    addresses: 0.1,
+    names: 0.1,
+    validation: 0.05,
+    default: 0.1
   };
 
   const finalWeights = { ...defaultWeights, ...weights };
 
-  const fieldScores: Array<{ score: number; weight: number }> = [];
+  // Track all field scores and required field scores separately
+  const allFieldScores: Array<{ score: number; weight: number; isRequired: boolean }> = [];
+  const requiredFieldScores: Array<{ score: number; weight: number; fieldName: string }> = [];
 
   for (const [fieldName, value] of Object.entries(data)) {
     if (value && typeof value === 'object' && 'confidence' in value) {
       const fieldData = value as any;
       const confidenceLevel = fieldData.confidence;
+      const reasonCode = fieldData.reason_code;
 
-      let score = 0;
-      if (confidenceLevel === 'high') score = 0.9;
-      else if (confidenceLevel === 'medium') score = 0.6;
-      else if (confidenceLevel === 'low') score = 0.3;
+      // Calculate field score using both confidence and reason_code
+      const fieldScore = calculateFieldConfidenceScore(confidenceLevel, reasonCode);
+      perFieldConfidence[fieldName] = fieldScore;
 
       const category = getFieldCategory(fieldName);
       const weight = finalWeights[category];
 
-      fieldScores.push({ score, weight });
+      const isRequired = requiredFields.includes(fieldName);
+      allFieldScores.push({ score: fieldScore, weight, isRequired });
+
+      if (isRequired) {
+        requiredFieldScores.push({ score: fieldScore, weight, fieldName });
+      }
     }
   }
 
-  if (fieldScores.length === 0) return 0;
+  // Check for missing required fields
+  const missingRequiredFields: string[] = [];
+  for (const requiredField of requiredFields) {
+    if (!(requiredField in perFieldConfidence)) {
+      // Field is required but not present in extracted data
+      missingRequiredFields.push(requiredField);
+      // Add zero score for missing required field (heavy penalty)
+      const category = getFieldCategory(requiredField);
+      const weight = finalWeights[category];
+      requiredFieldScores.push({ score: 0, weight, fieldName: requiredField });
+    }
+  }
 
-  // Calculate weighted average
-  const totalWeightedScore = fieldScores.reduce((sum, item) => sum + item.score * item.weight, 0);
-  const totalWeight = fieldScores.reduce((sum, item) => sum + item.weight, 0);
+  if (requiredFieldScores.length === 0) {
+    // No required fields found - return low confidence
+    return { overall: 0, perField: perFieldConfidence };
+  }
 
-  return totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+  // Calculate weighted average ONLY for required fields
+  const totalWeightedScore = requiredFieldScores.reduce((sum, item) => sum + item.score * item.weight, 0);
+  const totalWeight = requiredFieldScores.reduce((sum, item) => sum + item.weight, 0);
+
+  // Overall confidence is based on required fields only
+  // Missing required fields already contribute 0 score, which reduces overall
+  const overallConfidence = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+
+  return {
+    overall: overallConfidence,
+    perField: perFieldConfidence
+  };
 }
 
 // no export of deprecated CoreMessage

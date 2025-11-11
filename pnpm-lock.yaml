@@ -80,6 +80,9 @@ importers:
       hono:
         specifier: ^4.9.6
         version: 4.10.3
+      jsonrepair:
+        specifier: ^3.12.0
+        version: 3.13.1
       langfuse:
         specifier: ^3.30.1
         version: 3.38.6
@@ -2512,6 +2515,10 @@ packages:
   jsonpointer@5.0.1:
     resolution: {integrity: sha512-p/nXbhSEcu3pZRdkW1OfJhpsVtW1gd4Wa1fnQc9YLiTfAjn0312eMKimbdIQzuZl9aa9xUGaRlP9T/CJE/ditQ==}
     engines: {node: '>=0.10.0'}
+
+  jsonrepair@3.13.1:
+    resolution: {integrity: sha512-WJeiE0jGfxYmtLwBTEk8+y/mYcaleyLXWaqp5bJu0/ZTSeG0KQq/wWQ8pmnkKenEdN6pdnn6QtcoSUkbqDHWNw==}
+    hasBin: true
 
   just-clone@6.2.0:
     resolution: {integrity: sha512-1IynUYEc/HAwxhi3WDpIpxJbZpMCvvrrmZVqvj9EhpvbH8lls7HhdhiByjL7DkAaWlLIzpC0Xc/VPvy/UxLNjA==}
@@ -6355,6 +6362,8 @@ snapshots:
   json-stringify-deterministic@1.0.12: {}
 
   jsonpointer@5.0.1: {}
+
+  jsonrepair@3.13.1: {}
 
   just-clone@6.2.0: {}
 
