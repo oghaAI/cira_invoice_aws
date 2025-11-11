@@ -219,7 +219,14 @@ export class DatabaseClient implements IDatabaseClient {
     const connectionString = config?.connectionString;
     this.pool = new Pool(
       connectionString
-        ? { connectionString, ssl: config?.ssl ?? true, max: 10 }
+        ? {
+            connectionString,
+            ssl: config?.ssl ?? true,
+            max: 10,
+            idleTimeoutMillis: 30000, // Close idle connections after 30s
+            connectionTimeoutMillis: 5000, // Timeout for acquiring connection
+            allowExitOnIdle: true // Allow pool to close when Lambda container idles
+          }
         : {
             host: config?.host,
             port: config?.port,
@@ -227,14 +234,25 @@ export class DatabaseClient implements IDatabaseClient {
             user: config?.user,
             password: config?.password,
             ssl: config?.ssl ?? true,
-            max: 10
+            max: 10,
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 5000,
+            allowExitOnIdle: true
           }
     );
   }
 
   /**
    * Gracefully close all database connections in the pool.
-   * Should be called when shutting down the application or in Lambda finally blocks.
+   *
+   * NOTE: When using getSharedDatabaseClient() in Lambda environments, do NOT call this method.
+   * The shared client is reused across warm Lambda invocations, and the Lambda container
+   * lifecycle will handle cleanup automatically.
+   *
+   * Only call this method when:
+   * - Using DatabaseClient directly (not via getSharedDatabaseClient)
+   * - Shutting down a long-running application
+   * - Testing environments that need explicit cleanup
    */
   async end(): Promise<void> {
     await this.pool.end();
@@ -513,3 +531,8 @@ export async function withDatabaseClient<T>(
     await client.end();
   }
 }
+
+/**
+ * Export shared database client utilities for Lambda connection pooling optimization
+ */
+export * from './shared-client';

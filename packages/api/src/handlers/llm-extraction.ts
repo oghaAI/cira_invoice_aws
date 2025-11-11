@@ -42,7 +42,7 @@
 import '../instrumentation';
 
 import { extractInvoiceWithTypeDetection } from '../services/llm/client';
-import { DatabaseClient } from '@cira/database';
+import { getSharedDatabaseClient } from '@cira/database';
 import { flushSpans, langfuse } from '../instrumentation';
 
 /**
@@ -185,7 +185,7 @@ export const handler = async (event: any) => {
           return config;
         })();
 
-    const db = new DatabaseClient(dbConfig);
+    const db = getSharedDatabaseClient(dbConfig);
 
     try {
       // Load OCR text from database (stored by OCR processing step)
@@ -270,7 +270,8 @@ export const handler = async (event: any) => {
 
       return result;
     } finally {
-      await db.end();
+      // Do not call db.end() - let Lambda container lifecycle manage connection cleanup
+      // The shared database client is reused across warm Lambda invocations
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -809,3 +809,177 @@ This file contains detailed logs of all batch processing runs.
 | 4203385 | ce60afea... | ❌ error | - | Failed to get status: 500... |
 | 4515484 | eb47811f... | ❌ error | - | Failed to get status: 500... |
 
+
+---
+
+## Run: 2025-11-11T02:16:25.956Z
+
+**Configuration:**
+- Concurrency: 2
+- Timeout: 300000ms
+- Limit: 20
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 78
+- Processed: 14
+- ✅ Completed: 14
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 114.6s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4673150 | 20d32888... | ✅ completed | general | - |
+| 4673151 | d7c5c523... | ✅ completed | general | - |
+| 4673152 | 69f78858... | ✅ completed | general | - |
+| 4673153 | 14568e8d... | ✅ completed | general | - |
+| 4673154 | 23adf4f1... | ✅ completed | general | - |
+| 4673156 | 6da8c484... | ✅ completed | general | - |
+| 4673261 | f1e614c9... | ✅ completed | general | - |
+| 4673375 | 51ad3dc4... | ✅ completed | general | - |
+| 4673949 | 7cec89d8... | ✅ completed | general | - |
+| 4673420 | ad3196ed... | ✅ completed | general | - |
+| 4730916 | b5f43fce... | ✅ completed | general | - |
+| 4673954 | bb5c2a01... | ✅ completed | general | - |
+| 4731156 | 054ac759... | ✅ completed | general | - |
+| 4731847 | a7b91604... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-11T02:21:30.507Z
+
+**Configuration:**
+- Concurrency: 2
+- Timeout: 300000ms
+- Limit: 20
+
+**Summary:**
+- Total in input: 92
+- Skipped (already processed): 72
+- Processed: 20
+- ✅ Completed: 19
+- ❌ Failed: 1
+- ⏱️ Timeout: 0
+- Duration: 164.5s
+- Success Rate: 95.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4359358 | 3b03e0c6... | ❌ failed | - | - |
+| 4359360 | 73dbc58e... | ✅ completed | general | - |
+| 4359715 | df37aeeb... | ✅ completed | general | - |
+| 4406408 | d6f311f6... | ✅ completed | general | - |
+| 4405999 | f385881b... | ✅ completed | general | - |
+| 4462880 | a8d1d6ab... | ✅ completed | general | - |
+| 4462919 | a61d1065... | ✅ completed | general | - |
+| 4462928 | eb0a60b3... | ✅ completed | general | - |
+| 4462931 | 469fee78... | ✅ completed | general | - |
+| 4463144 | b83ae496... | ✅ completed | general | - |
+| 4463235 | e654091e... | ✅ completed | general | - |
+| 4515727 | 1ca39e7f... | ✅ completed | general | - |
+| 4563026 | 36321888... | ✅ completed | general | - |
+| 4563112 | 4143aa6d... | ✅ completed | general | - |
+| 4563148 | 52fe4d95... | ✅ completed | general | - |
+| 4563257 | edcd8e7e... | ✅ completed | general | - |
+| 4563336 | a001375b... | ✅ completed | general | - |
+| 4563525 | ec92a837... | ✅ completed | utility | - |
+| 4563536 | 5179c7e9... | ✅ completed | utility | - |
+| 4563548 | 5b6f6cb5... | ✅ completed | utility | - |
+
+
+---
+
+## Run: 2025-11-11T03:51:36.628Z
+
+**Configuration:**
+- Concurrency: 2
+- Timeout: 300000ms
+- Limit: 20
+
+**Summary:**
+- Total in input: 80
+- Skipped (already processed): 60
+- Processed: 20
+- ✅ Completed: 20
+- ❌ Failed: 0
+- ⏱️ Timeout: 0
+- Duration: 214.9s
+- Success Rate: 100.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4563602 | ccecc4fb... | ✅ completed | utility | - |
+| 4255298 | e7bbefab... | ✅ completed | utility | - |
+| 4100306 | bef14ac5... | ✅ completed | general | - |
+| 4202823 | 6a41c09d... | ✅ completed | general | - |
+| 4563525 | 8450822e... | ✅ completed | utility | - |
+| 4563536 | 72bc39dd... | ✅ completed | utility | - |
+| 4563548 | feaffe4d... | ✅ completed | utility | - |
+| 4410096 | 412db1ef... | ✅ completed | general | - |
+| 4563559 | ecae6ff5... | ✅ completed | utility | - |
+| 4410107 | de65b5c8... | ✅ completed | general | - |
+| 4563257 | 5cd08090... | ✅ completed | general | - |
+| 4300769 | 061d63d8... | ✅ completed | general | - |
+| 4099817 | 20877f46... | ✅ completed | general | - |
+| 4563272 | 8c2bdcb4... | ✅ completed | general | - |
+| 4565135 | 2b6ddac1... | ✅ completed | utility | - |
+| 4565017 | 1f2de05d... | ✅ completed | utility | - |
+| 4565145 | dc8f0be3... | ✅ completed | utility | - |
+| 4731847 | 092c7888... | ✅ completed | general | - |
+| 4616791 | c0d6b4d1... | ✅ completed | general | - |
+| 4616801 | 1827c1eb... | ✅ completed | general | - |
+
+
+---
+
+## Run: 2025-11-11T04:09:48.437Z
+
+**Configuration:**
+- Concurrency: 2
+- Timeout: 300000ms
+- Limit: 20
+
+**Summary:**
+- Total in input: 80
+- Skipped (already processed): 60
+- Processed: 20
+- ✅ Completed: 17
+- ❌ Failed: 3
+- ⏱️ Timeout: 0
+- Duration: 169.8s
+- Success Rate: 85.0%
+
+**Job Details:**
+
+| WF_JOB_ID | Job ID | Status | Invoice Type | Error |
+|-----------|--------|--------|--------------|-------|
+| 4406409 | 6607bc5c... | ✅ completed | general | - |
+| 4673440 | fdd8a322... | ✅ completed | general | - |
+| 4673639 | 41a158ff... | ✅ completed | general | - |
+| 4147533 | 8a72a51f... | ✅ completed | insurance | - |
+| 4203374 | 9d360d6b... | ✅ completed | general | - |
+| 4203372 | 672244f7... | ✅ completed | general | - |
+| 4203385 | fb54d1ae... | ✅ completed | general | - |
+| 4203403 | 267c9bae... | ✅ completed | general | - |
+| 4515483 | 5fc07d8d... | ✅ completed | general | - |
+| 4515484 | 6cb2b41d... | ✅ completed | general | - |
+| 4563290 | 7fa5697e... | ✅ completed | general | - |
+| 4731453 | 760d12b0... | ✅ completed | general | - |
+| 4563147 | f30f6230... | ✅ completed | general | - |
+| 4300797 | 161145bb... | ✅ completed | general | - |
+| 4202796 | ec01e269... | ✅ completed | general | - |
+| 4202863 | 7ebfe37f... | ✅ completed | general | - |
+| 4100647 | e27c9bd3... | ❌ failed | - | - |
+| 4099965 | 68568995... | ✅ completed | general | - |
+| 4254263 | 402a5cdf... | ❌ failed | - | - |
+| 4254264 | dbdac63e... | ❌ failed | - | - |
+

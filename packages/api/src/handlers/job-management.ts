@@ -33,7 +33,7 @@
  */
 
 import { APIGatewayProxyResult } from 'aws-lambda';
-import { DatabaseClient } from '@cira/database';
+import { getSharedDatabaseClient } from '@cira/database';
 import { API_VERSION } from '../index';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
@@ -147,55 +147,50 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
         if (creds.password) config.password = creds.password;
         return config;
       })();
-  const db = new DatabaseClient(dbConfig);
+  const db = getSharedDatabaseClient(dbConfig);
 
   try {
     // Handle direct invocation by Step Functions for job updates
     if (event && typeof event === 'object' && 'action' in event) {
       const { action, jobId } = event as { action: string; jobId: string };
-      const db = new DatabaseClient(dbConfig);
-      try {
-        if (!jobId || typeof jobId !== 'string') {
-          return { statusCode: 400, body: JSON.stringify({ error: 'Missing jobId' }) };
-        }
-        if (action === 'start') {
-          await db.setJobStatusProcessing(jobId);
-          return { ok: true };
-        }
-        if (action === 'phase') {
-          const { phase } = event as { phase: 'analyzing_invoice' | 'extracting_data' | 'verifying_data' };
-          await db.setJobProcessingPhase(jobId, phase);
-          return { ok: true };
-        }
-        if (action === 'complete') {
-          const { result } = event as any;
-          // Persist job result if provided
-          if (result) {
-            await db.upsertJobResult({
-              jobId,
-              extractedData: result?.extractedData ?? null,
-              confidenceScore: result?.confidence ?? null,
-              tokensUsed: result?.tokensUsed ?? null
-            });
-          }
-          // Mark job as completed
-          await db.updateJobStatus(jobId, 'completed', null, new Date());
-          // Clear phase if supported
-          await db.clearJobProcessingPhase(jobId);
-          return { ok: true };
-        }
-        if (action === 'fail') {
-          const err = event?.error;
-          const errorMessage =
-            typeof err === 'string' ? err : err?.Cause || err?.Error || JSON.stringify(err ?? {});
-          await db.updateJobStatus(jobId, 'failed', errorMessage ?? 'failed');
-          await db.clearJobProcessingPhase(jobId);
-          return { ok: true };
-        }
-        return { statusCode: 400, body: JSON.stringify({ error: 'Unsupported action' }) };
-      } finally {
-        await db.end();
+      if (!jobId || typeof jobId !== 'string') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Missing jobId' }) };
       }
+      if (action === 'start') {
+        await db.setJobStatusProcessing(jobId);
+        return { ok: true };
+      }
+      if (action === 'phase') {
+        const { phase } = event as { phase: 'analyzing_invoice' | 'extracting_data' | 'verifying_data' };
+        await db.setJobProcessingPhase(jobId, phase);
+        return { ok: true };
+      }
+      if (action === 'complete') {
+        const { result } = event as any;
+        // Persist job result if provided
+        if (result) {
+          await db.upsertJobResult({
+            jobId,
+            extractedData: result?.extractedData ?? null,
+            confidenceScore: result?.confidence ?? null,
+            tokensUsed: result?.tokensUsed ?? null
+          });
+        }
+        // Mark job as completed
+        await db.updateJobStatus(jobId, 'completed', null, new Date());
+        // Clear phase if supported
+        await db.clearJobProcessingPhase(jobId);
+        return { ok: true };
+      }
+      if (action === 'fail') {
+        const err = event?.error;
+        const errorMessage =
+          typeof err === 'string' ? err : err?.Cause || err?.Error || JSON.stringify(err ?? {});
+        await db.updateJobStatus(jobId, 'failed', errorMessage ?? 'failed');
+        await db.clearJobProcessingPhase(jobId);
+        return { ok: true };
+      }
+      return { statusCode: 400, body: JSON.stringify({ error: 'Unsupported action' }) };
     }
     const { httpMethod, resource, pathParameters, body } = event as any;
 
@@ -419,7 +414,8 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
     });
     return json(500, errorBody('INTERNAL_SERVER_ERROR', 'An error occurred processing your request'));
   } finally {
-    await db.end();
+    // Do not call db.end() - let Lambda container lifecycle manage connection cleanup
+    // The shared database client is reused across warm Lambda invocations
     log('info', 'Request completed', { duration_ms: Date.now() - start });
   }
 };

@@ -193,7 +193,7 @@ async function fetchWithRetry(url: string, totalTimeoutMs: number): Promise<{ re
       break;
     }
   }
-  return { retries: attempt, lastError: lastError || undefined };
+  return { retries: attempt, ...(lastError ? { lastError } : {}) };
 }
 
 async function consumeBodyWithLimit(body: ReadableStream<Uint8Array> | null, limit: number): Promise<number> {
@@ -216,7 +216,7 @@ async function consumeBodyWithLimit(body: ReadableStream<Uint8Array> | null, lim
 }
 
 import { getOcrProvider, OcrError } from '../services/ocr';
-import { DatabaseClient } from '@cira/database';
+import { getSharedDatabaseClient } from '@cira/database';
 
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
@@ -388,18 +388,14 @@ export const handler = async (event: any) => {
             if (creds.password) config.password = creds.password;
             return config;
           })();
-      const db = new DatabaseClient(dbConfig);
-      try {
-        await db.upsertJobResult({
-          jobId,
-          rawOcrText: rawText,
-          ocrProvider: ocr.metadata.provider ?? provider.name,
-          ocrDurationMs: durationInt,
-          ocrPages: pagesInt
-        });
-      } finally {
-        await db.end();
-      }
+      const db = getSharedDatabaseClient(dbConfig);
+      await db.upsertJobResult({
+        jobId,
+        rawOcrText: rawText,
+        ocrProvider: ocr.metadata.provider ?? provider.name,
+        ocrDurationMs: durationInt,
+        ocrPages: pagesInt
+      });
 
       // Return a compact payload to Step Functions to avoid state size limits.
       // Raw OCR text is persisted in the database and not included here.
