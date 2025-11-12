@@ -58,6 +58,8 @@ export interface Job {
   processingPhase: ProcessingPhase | null;
   /** Source PDF URL to be processed */
   pdfUrl: string;
+  /** Supabase storage URL for PDFs that failed direct OCR (fallback URL) */
+  tempUrl: string | null;
   /** Timestamp when job was initially created */
   createdAt: Date;
   /** Timestamp of last status update (auto-updated via trigger) */
@@ -172,6 +174,8 @@ export interface IDatabaseClient {
   setJobProcessingPhase(id: string, phase: ProcessingPhase): Promise<Job | null>;
   /** Clear processing phase (typically on completion or failure) */
   clearJobProcessingPhase(id: string): Promise<Job | null>;
+  /** Update temp URL (Supabase storage URL for PDFs that failed direct OCR) */
+  updateJobTempUrl(id: string, tempUrl: string): Promise<Job | null>;
 
   /**
    * Upsert job result data (supports partial updates from OCR and LLM steps).
@@ -288,7 +292,7 @@ export class DatabaseClient implements IDatabaseClient {
     const query = `
       INSERT INTO jobs (client_id, pdf_url)
       VALUES ($1, $2)
-      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
     `;
 
     const result = await this.pool.query(query, [params.clientId, params.pdfUrl]);
@@ -298,7 +302,7 @@ export class DatabaseClient implements IDatabaseClient {
 
   async getJobById(id: string): Promise<Job | null> {
     const query = `
-      SELECT id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      SELECT id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
       FROM jobs
       WHERE id = $1
     `;
@@ -317,7 +321,7 @@ export class DatabaseClient implements IDatabaseClient {
     const limit = options?.limit ?? 50;
 
     const query = `
-      SELECT id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      SELECT id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
       FROM jobs
       WHERE ${conditions.join(' AND ')}
       ORDER BY created_at DESC
@@ -337,7 +341,7 @@ export class DatabaseClient implements IDatabaseClient {
       UPDATE jobs
       SET status = $2, error_message = $3, completed_at = $4
       WHERE id = $1
-      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
     `;
     const result = await this.pool.query(query, [id, status, errorMessage ?? null, completedAt ?? null]);
     if (result.rowCount === 0) return null;
@@ -350,7 +354,7 @@ export class DatabaseClient implements IDatabaseClient {
       UPDATE jobs
       SET status = 'processing', error_message = NULL, completed_at = NULL
       WHERE id = $1
-      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
     `;
     const result = await this.pool.query(query, [id]);
     if (result.rowCount === 0) return null;
@@ -363,7 +367,7 @@ export class DatabaseClient implements IDatabaseClient {
       UPDATE jobs
       SET processing_phase = $2
       WHERE id = $1
-      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
     `;
     const result = await this.pool.query(query, [id, phase]);
     if (result.rowCount === 0) return null;
@@ -376,9 +380,22 @@ export class DatabaseClient implements IDatabaseClient {
       UPDATE jobs
       SET processing_phase = NULL
       WHERE id = $1
-      RETURNING id, client_id, status, processing_phase, pdf_url, created_at, updated_at, completed_at, error_message
+      RETURNING id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
     `;
     const result = await this.pool.query(query, [id]);
+    if (result.rowCount === 0) return null;
+    return this.mapJob(result.rows[0]);
+  }
+
+  // Update temp URL (Supabase storage URL for PDFs that failed direct OCR)
+  async updateJobTempUrl(id: string, tempUrl: string): Promise<Job | null> {
+    const query = `
+      UPDATE jobs
+      SET temp_url = $2
+      WHERE id = $1
+      RETURNING id, client_id, status, processing_phase, pdf_url, temp_url, created_at, updated_at, completed_at, error_message
+    `;
+    const result = await this.pool.query(query, [id, tempUrl]);
     if (result.rowCount === 0) return null;
     return this.mapJob(result.rows[0]);
   }
@@ -467,6 +484,7 @@ export class DatabaseClient implements IDatabaseClient {
       status: row.status,
       processingPhase: row.processing_phase ?? null,
       pdfUrl: row.pdf_url,
+      tempUrl: row.temp_url ?? null,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
       completedAt: row.completed_at ? new Date(row.completed_at) : null,

@@ -202,6 +202,7 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
         if (resource === '/jobs') {
           const parsed = body ? JSON.parse(body) : {};
           const pdfUrl: string | undefined = parsed.pdf_url || parsed.pdfUrl;
+          const pages: number[] | undefined = parsed.pages;
 
           // Basic validation per story: presence, https, length<=2048
           if (!pdfUrl) {
@@ -219,6 +220,17 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
           if (parsedUrl.protocol !== 'https:') {
             return json(400, errorBody('VALIDATION_ERROR', 'pdf_url must use HTTPS'));
           }
+
+          // Validate pages parameter if provided (must be array of numbers, 0-indexed)
+          if (pages !== undefined) {
+            if (!Array.isArray(pages)) {
+              return json(400, errorBody('VALIDATION_ERROR', 'pages must be an array of integers'));
+            }
+            if (pages.length > 0 && !pages.every((p) => typeof p === 'number' && Number.isInteger(p) && p >= 0)) {
+              return json(400, errorBody('VALIDATION_ERROR', 'pages must contain only non-negative integers'));
+            }
+          }
+
           // Note: Skipping network HEAD accessibility check due to isolated subnet; will be handled downstream
 
           const job = await db.createJob({ clientId, pdfUrl });
@@ -231,9 +243,14 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
               const sfn = new SFNClient({
                 requestHandler: new NodeHttpHandler({ connectionTimeout: 1500, requestTimeout: 3000 })
               });
+              // Build Step Functions input with optional pages parameter
+              const sfnInput: any = { jobId: job.id, pdfUrl };
+              if (pages && pages.length > 0) {
+                sfnInput.pages = pages;
+              }
               const cmd = new StartExecutionCommand({
                 stateMachineArn,
-                input: JSON.stringify({ jobId: job.id, pdfUrl })
+                input: JSON.stringify(sfnInput)
               });
               const exec = await sfn.send(cmd);
               log('info', 'Triggered Step Functions execution', { jobId: job.id, executionArn: exec.executionArn });
@@ -390,7 +407,8 @@ export const handler = async (event: any): Promise<APIGatewayProxyResult | any> 
             extracted_data: extractedData,
             confidence_score: result.confidenceScore,
             tokens_used: result.tokensUsed,
-            raw_ocr_markdown: result.rawOcrText
+            raw_ocr_markdown: result.rawOcrText,
+            temp_url: job.tempUrl
           };
 
           log('info', 'Result retrieval', {

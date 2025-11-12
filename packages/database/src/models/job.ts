@@ -54,6 +54,8 @@ export interface Job {
   status: JobStatus;
   /** Source PDF URL that will be processed by the OCR → LLM pipeline */
   pdfUrl: string;
+  /** Supabase storage URL for PDFs that failed direct OCR (fallback URL) */
+  tempUrl: string | null;
   /** Timestamp when job was initially created and entered 'queued' status */
   createdAt: Date;
   /** Timestamp of last status update (auto-maintained by database trigger) */

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     status job_status DEFAULT 'queued',
     processing_phase TEXT CHECK (processing_phase IS NULL OR processing_phase IN ('analyzing_invoice','extracting_data','verifying_data')),
     pdf_url VARCHAR(2048) NOT NULL,
+    temp_url TEXT, -- Supabase storage URL for PDFs that failed direct OCR
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     completed_at TIMESTAMP,
@@ -72,4 +73,11 @@ DO $$ BEGIN
     );
 EXCEPTION
     WHEN duplicate_object THEN null;
+END $$;
+
+-- Add temp_url column for existing tables
+DO $$ BEGIN
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS temp_url TEXT;
+EXCEPTION
+    WHEN undefined_table THEN null;
 END $$;

@@ -82,6 +82,8 @@ export interface OcrInput {
   pdfUrl?: string;
   /** Binary stream or buffer for direct document processing */
   stream?: ReadableStream<Uint8Array> | Buffer;
+  /** Optional array of page indices to extract (0-indexed). Example: [0, 1, 2] for first 3 pages */
+  pages?: number[];
 }
 
 /**

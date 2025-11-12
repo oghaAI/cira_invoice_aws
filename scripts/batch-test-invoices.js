@@ -174,6 +174,7 @@ async function processInvoice(wfJobId, pdfUrl) {
     JOB_ID: null,
     STATUS: null,
     INVOICE_TYPE: null,
+    TEMP_URL: null,
     ERROR: null,
     RAW_EXTRACTION: null
   };
@@ -192,6 +193,9 @@ async function processInvoice(wfJobId, pdfUrl) {
       // Extract invoice type
       const invoiceTypeField = jobResult.extracted_data?.invoice_type;
       result.INVOICE_TYPE = invoiceTypeField?.value || 'unknown';
+
+      // Extract temp_url (Supabase storage URL if PDF was uploaded)
+      result.TEMP_URL = jobResult.temp_url || '';
 
       // Flatten all extracted fields
       const flattened = flattenResult(jobResult.extracted_data);

@@ -80,14 +80,20 @@ export function mistralProvider(): OcrProvider {
         if (!input.pdfUrl) {
           throw new OcrError({ message: 'stream input not supported in sync mode yet', category: 'VALIDATION', provider: name });
         }
-        const payload = {
+        const payload: any = {
           model: ocrModel,
           document: {
             type: 'document_url',
             document_url: input.pdfUrl
           },
           include_image_base64: includeImageBase64
-        } as const;
+        };
+
+        // Add pages parameter if specified (0-indexed array)
+        if (input.pages && Array.isArray(input.pages) && input.pages.length > 0) {
+          payload.pages = input.pages;
+        }
+
         const { data, requestId } = await http<any>(syncPathEnv, { method: 'POST', body: JSON.stringify(payload) });
         const durationMs = Date.now() - start;
 
@@ -118,6 +124,11 @@ export function mistralProvider(): OcrProvider {
       }
 
       const createPayload: any = input.pdfUrl ? { pdfUrl: input.pdfUrl } : { upload: true };
+
+      // Add pages parameter if specified (0-indexed array)
+      if (input.pages && Array.isArray(input.pages) && input.pages.length > 0) {
+        createPayload.pages = input.pages;
+      }
 
       // Create job
       const { data: created, requestId: createReqId } = await http<{ id: string; status: string }>(CREATE_PATH, {

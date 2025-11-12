@@ -217,6 +217,7 @@ async function consumeBodyWithLimit(body: ReadableStream<Uint8Array> | null, lim
 
 import { getOcrProvider, OcrError } from '../services/ocr';
 import { getSharedDatabaseClient } from '@cira/database';
+import { downloadPdf } from '../utils/supabase-storage';
 
 async function getDbCredentials() {
   const secretArn = process.env['DATABASE_SECRET_ARN'];
@@ -255,6 +256,7 @@ export const handler = async (event: any) => {
   const t0 = now();
   const jobId = event?.jobId ?? null;
   const pdfUrl = event?.pdfUrl ?? null;
+  const pages: number[] | undefined = event?.pages;
   const allowlist = parseAllowedDomains();
 
   const log = (decision: DecisionCode, extra?: Record<string, unknown>) => {
@@ -352,7 +354,11 @@ export const handler = async (event: any) => {
     const provider = getOcrProvider();
     const ocrStart = now();
     try {
-      const ocr = await provider.extract({ pdfUrl });
+      const ocrInput: { pdfUrl: string; pages?: number[] } = { pdfUrl };
+      if (pages && pages.length > 0) {
+        ocrInput.pages = pages;
+      }
+      const ocr = await provider.extract(ocrInput);
       const rawText = ocr.markdown ?? '';
       const rawBytes = Buffer.byteLength(rawText, 'utf8');
 
@@ -413,8 +419,115 @@ export const handler = async (event: any) => {
       log('OK', { bytes: contentLength ? Number(contentLength) : downloaded, retries, provider: provider.name, ocrDurationMs: now() - ocrStart });
       return out;
     } catch (err) {
+      // Check if this is the specific Mistral error that requires base64 fallback
+      const shouldTryBase64Fallback =
+        err instanceof OcrError &&
+        err.category === 'VALIDATION' &&
+        err.message.includes('Could not determine document type');
+
+      if (shouldTryBase64Fallback) {
+        log('NETWORK_ERROR', {
+          provider: provider.name,
+          reason: 'mistral_url_validation_error',
+          message: 'Attempting base64 encoding fallback',
+          originalError: err.message
+        });
+
+        try {
+          // Download PDF and convert to base64 data URL
+          const { buffer } = await downloadPdf(pdfUrl);
+          const base64 = buffer.toString('base64');
+          const dataUrl = `data:application/pdf;base64,${base64}`;
+
+          log('OK', {
+            reason: 'pdf_downloaded_for_base64',
+            bufferSize: buffer.length,
+            base64Length: base64.length
+          });
+
+          // Retry OCR with base64 data URL (single retry, no further fallback)
+          const retryOcrInput: { pdfUrl: string; pages?: number[] } = { pdfUrl: dataUrl };
+          if (pages && pages.length > 0) {
+            retryOcrInput.pages = pages;
+          }
+          const ocr = await provider.extract(retryOcrInput);
+          const rawText = ocr.markdown ?? '';
+          const rawBytes = Buffer.byteLength(rawText, 'utf8');
+
+          // Basic text validation
+          if (typeof rawText !== 'string' || rawText.length === 0) {
+            log('NETWORK_ERROR', { provider: provider.name, reason: 'empty_text_after_base64_retry' });
+            return { statusCode: 400, error_code: 'VALIDATION_ERROR_OCR_TEXT', message: 'OCR text is empty after base64 retry' };
+          }
+          if (!isUtf8Safe(rawText)) {
+            log('NETWORK_ERROR', { provider: provider.name, reason: 'utf8_invalid_after_base64_retry' });
+            return { statusCode: 400, error_code: 'VALIDATION_ERROR_OCR_TEXT', message: 'OCR text not UTF-8 safe after base64 retry' };
+          }
+          if (rawBytes > MAX_OCR_TEXT_BYTES) {
+            log('NETWORK_ERROR', { provider: provider.name, reason: 'ocr_text_too_large_after_base64_retry', bytes: rawBytes });
+            return { statusCode: 413, error_code: 'OCR_TEXT_TOO_LARGE', message: 'OCR text exceeds size limit after base64 retry', bytes: rawBytes };
+          }
+
+          // Persist OCR outputs
+          const durationInt = Number.isFinite(ocr.metadata.durationMs) ? Math.max(0, Math.round(ocr.metadata.durationMs)) : null;
+          const pagesInt = Number.isFinite((ocr.metadata as any).pages)
+            ? Math.max(0, Math.trunc((ocr.metadata as any).pages as number))
+            : null;
+
+          // Build database configuration
+          const dbConfig: any = process.env['DATABASE_URL']
+            ? { connectionString: process.env['DATABASE_URL'], ssl: { rejectUnauthorized: false } }
+            : await (async () => {
+                const creds = await getDbCredentials();
+                const config: any = { ssl: true };
+                if (process.env['DATABASE_PROXY_ENDPOINT']) config.host = process.env['DATABASE_PROXY_ENDPOINT'];
+                if (process.env['DATABASE_NAME']) config.database = process.env['DATABASE_NAME'];
+                if (creds.user) config.user = creds.user;
+                if (creds.password) config.password = creds.password;
+                return config;
+              })();
+          const db = getSharedDatabaseClient(dbConfig);
+
+          await db.upsertJobResult({
+            jobId,
+            rawOcrText: rawText,
+            ocrProvider: ocr.metadata.provider ?? provider.name,
+            ocrDurationMs: durationInt,
+            ocrPages: pagesInt
+          });
+
+          // Return success
+          const out = {
+            jobId,
+            status: 'ocr_completed',
+            ocr: {
+              provider: ocr.metadata.provider,
+              metadata: {
+                pages: ocr.metadata.pages,
+                durationMs: ocr.metadata.durationMs
+              }
+            }
+          };
+          log('OK', {
+            bytes: contentLength ? Number(contentLength) : downloaded,
+            retries,
+            provider: provider.name,
+            ocrDurationMs: now() - ocrStart,
+            usedBase64Fallback: true
+          });
+          return out;
+        } catch (fallbackErr) {
+          // Fallback failed, log and return original error
+          log('NETWORK_ERROR', {
+            provider: provider.name,
+            reason: 'base64_fallback_failed',
+            fallbackError: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+          });
+        }
+      }
+
+      // Return original error (either fallback not needed or fallback failed)
       const mapped = mapToUnifiedError(err);
-      // Keep decision codes consistent with validation layer; include category in extra fields
       log('NETWORK_ERROR', { provider: provider.name, ocrDurationMs: now() - ocrStart, error_category: mapped.code, message: mapped.message });
       return { statusCode: mapped.statusCode, error_code: mapped.code, message: mapped.message };
     }
