@@ -96,3 +96,8 @@ db/
 # BMAD (local only)
 .bmad-core/
 .bmad-*/
+
+.claude/
+.codex/
+.cursor/
+archive/
