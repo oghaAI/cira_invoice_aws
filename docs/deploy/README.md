@@ -45,14 +45,14 @@ The CIRA Invoice system deploys a complete serverless invoice processing pipelin
 - [Monitoring](monitoring.md) - CloudWatch dashboards and alarms
 
 🗄️ **Database:**
-- [Database Migration](database-migration.md) - Moving from Supabase to RDS
+- [Database Migration](database-migration.md) - Database migration procedures
 
 ## Environments
 
 The system supports three environments, each with different configurations:
 
 ### Development
-- **Database**: Supabase (external)
+- **Database**: External PostgreSQL
 - **Purpose**: Local development and testing
 - **Configuration**: `.env.dev.template`
 - **Deletion Protection**: Disabled
@@ -143,7 +143,7 @@ All deployment scripts are located in `scripts/deploy/`:
 
 Approximate monthly costs per environment:
 
-### Development (Supabase)
+### Development (External DB)
 - API Gateway: ~$3.50 (1M requests)
 - Lambda: ~$5.00 (100K executions)
 - Step Functions: ~$0.25
@@ -197,11 +197,12 @@ Approximate monthly costs per environment:
 ### Environment Variables
 ```bash
 # Required for all environments
-AZURE_OPENAI_API_KEY=your-key
-AZURE_OPENAI_ENDPOINT=your-endpoint
+AZURE_API_KEY=your-key
+AZURE_API_ENDPOINT=https://your-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 AWS_REGION=us-east-1
 
-# For Supabase (dev)
+# For external database (dev)
 USE_EXTERNAL_DATABASE=true
 DATABASE_URL=postgresql://...
 
@@ -256,7 +257,7 @@ curl https://your-api-endpoint/
 ┌────────────────────────────┐
 │   PostgreSQL Database      │
 │   • RDS (staging/prod)     │
-│   • Supabase (dev)         │
+│   • External DB (dev)      │
 └────────────────────────────┘
 ```
 

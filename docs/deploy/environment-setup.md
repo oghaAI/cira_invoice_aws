@@ -37,14 +37,14 @@ The system uses environment variables to configure:
 | AWS | `AWS_REGION`, `AWS_PROFILE` | AWS configuration |
 | CDK | `CDK_DEFAULT_ACCOUNT`, `CDK_DEFAULT_REGION` | CDK deployment |
 | Database | `USE_EXTERNAL_DATABASE`, `DATABASE_URL` | Database connection |
-| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` | LLM integration |
+| Azure AI | `AZURE_API_KEY`, `AZURE_API_ENDPOINT`, `AZURE_MODEL` | LLM integration (Mistral Small) |
 | Mistral | `MISTRAL_API_KEY` | OCR integration (optional) |
 | Application | `NODE_ENV`, `LOG_LEVEL` | Runtime behavior |
 | Deployment | `ENABLE_DELETION_PROTECTION`, `LOG_RETENTION_DAYS` | Infrastructure settings |
 
 ## Development Environment
 
-Development uses Supabase for quick setup and minimal AWS costs.
+Development environment setup for local testing.
 
 ### Quick Setup
 
@@ -73,37 +73,31 @@ CDK_DEFAULT_ACCOUNT=123456789012
 CDK_DEFAULT_REGION=us-east-1
 ```
 
-#### Database Configuration (Supabase)
+#### Database Configuration
 ```bash
-# Use external database (Supabase)
+# Use external database
 USE_EXTERNAL_DATABASE=true
 
-# Supabase connection string
-# Get from: Supabase Dashboard > Settings > Database > Connection string
-DATABASE_URL=postgresql://postgres.[project-id]:[password]@aws-0-ap-southeast-1.pooler.supabase.co:6543/postgres
+# PostgreSQL connection string
+DATABASE_URL=postgresql://user:password@host:port/database
 ```
 
-**Finding your Supabase connection string:**
-1. Log in to Supabase
-2. Select your project
-3. Go to **Settings** → **Database**
-4. Find **Connection string** section
-5. Choose **Node.js** format
-6. Use the **Connection pooling** URL (port 6543)
-
-#### Azure OpenAI Configuration
+#### Azure AI Configuration (Mistral Small)
 ```bash
-# Azure OpenAI API key
-# Get from: Azure Portal > Your OpenAI Resource > Keys and Endpoint
-AZURE_OPENAI_API_KEY=1234567890abcdef1234567890abcdef
+# Azure AI API key
+# Get from: Azure Portal > Your AI Resource > Keys and Endpoint
+AZURE_API_KEY=1234567890abcdef1234567890abcdef
 
-# Azure OpenAI endpoint
-AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
+# Azure AI endpoint
+AZURE_API_ENDPOINT=https://your-resource.services.ai.azure.com/models
+
+# Model deployment name
+AZURE_MODEL=mistral-small-2503
 ```
 
-**Finding your Azure OpenAI credentials:**
+**Finding your Azure AI credentials:**
 1. Log in to [Azure Portal](https://portal.azure.com)
-2. Navigate to your OpenAI resource
+2. Navigate to your Azure AI resource
 3. Go to **Keys and Endpoint**
 4. Copy **KEY 1** (or KEY 2)
 5. Copy **Endpoint** URL
@@ -145,15 +139,16 @@ AWS_PROFILE=default
 CDK_DEFAULT_ACCOUNT=123456789012
 CDK_DEFAULT_REGION=us-east-1
 
-# Database (Supabase)
+# Database
 USE_EXTERNAL_DATABASE=true
-DATABASE_URL=postgresql://postgres.abcdefghij:MyPassword123@aws-0-ap-southeast-1.pooler.supabase.co:6543/postgres
+DATABASE_URL=postgresql://user:password@host:port/database
 
-# Azure OpenAI
-AZURE_OPENAI_API_KEY=abc123def456ghi789jkl012mno345pqr
-AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
+# Azure AI (Mistral Small)
+AZURE_API_KEY=abc123def456ghi789jkl012mno345pqr
+AZURE_API_ENDPOINT=https://my-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 
-# Optional: Mistral
+# Optional: Mistral (for OCR)
 MISTRAL_API_KEY=your-mistral-key-here
 
 # Application
@@ -235,11 +230,12 @@ DB_ALLOCATED_STORAGE=50
 DB_MULTI_AZ=false
 DB_BACKUP_RETENTION_DAYS=14
 
-# Azure OpenAI (Consider using Secrets Manager)
-AZURE_OPENAI_API_KEY=abc123def456ghi789jkl012mno345pqr
-AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
+# Azure AI (Consider using Secrets Manager)
+AZURE_API_KEY=abc123def456ghi789jkl012mno345pqr
+AZURE_API_ENDPOINT=https://my-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 
-# Optional: Mistral
+# Optional: Mistral (for OCR)
 MISTRAL_API_KEY=your-mistral-key-here
 
 # Application
@@ -332,11 +328,12 @@ DB_ALLOCATED_STORAGE=100
 DB_MULTI_AZ=true
 DB_BACKUP_RETENTION_DAYS=30
 
-# Azure OpenAI (USE SECRETS MANAGER!)
+# Azure AI (USE SECRETS MANAGER!)
 # These should be empty in .env file
 # Store in AWS Secrets Manager instead
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_ENDPOINT=
+AZURE_API_KEY=
+AZURE_API_ENDPOINT=
+AZURE_MODEL=mistral-small-2503
 
 # Application
 NODE_ENV=production
@@ -364,7 +361,7 @@ For development, storing secrets in `.env` files is acceptable:
 
 ```bash
 # .env file
-AZURE_OPENAI_API_KEY=your-dev-key
+AZURE_API_KEY=your-dev-key
 ```
 
 **Important**: Never commit `.env` files to git!
@@ -376,19 +373,20 @@ For production, use AWS Secrets Manager:
 #### 1. Create Secrets
 
 ```bash
-# Azure OpenAI credentials
+# Azure AI credentials (Mistral Small)
 aws secretsmanager create-secret \
-  --name cira-invoice/prod/azure-openai \
-  --description "Azure OpenAI credentials for production" \
+  --name cira-invoice/prod/azure-ai \
+  --description "Azure AI credentials for production" \
   --secret-string '{
     "api_key": "your-production-key",
-    "endpoint": "https://your-resource.openai.azure.com/"
+    "endpoint": "https://your-resource.services.ai.azure.com/models",
+    "model": "mistral-small-2503"
   }'
 
-# Mistral API key
+# Mistral API key (for OCR)
 aws secretsmanager create-secret \
   --name cira-invoice/prod/mistral \
-  --description "Mistral API key for production" \
+  --description "Mistral API key for OCR in production" \
   --secret-string "your-mistral-key"
 ```
 
@@ -401,8 +399,9 @@ The CDK infrastructure automatically grants Lambda functions access to secrets i
 In your .env file:
 ```bash
 # Leave empty - Lambda will retrieve from Secrets Manager
-AZURE_OPENAI_API_KEY=
-AZURE_OPENAI_ENDPOINT=
+AZURE_API_KEY=
+AZURE_API_ENDPOINT=
+AZURE_MODEL=mistral-small-2503
 ```
 
 ### Alternative: AWS Systems Manager Parameter Store
@@ -435,16 +434,16 @@ Run the validation script:
 - [ ] All required variables are set
 - [ ] URLs are properly formatted (https://)
 - [ ] API keys are not empty or placeholder values
-- [ ] Database URL is valid (if using Supabase)
+- [ ] Database URL is valid
 - [ ] AWS account ID is correct
 - [ ] Environment matches intended deployment (dev/staging/prod)
 
 ### Common Validation Errors
 
-**Error: "AZURE_OPENAI_API_KEY is not set"**
+**Error: "AZURE_API_KEY is not set"**
 ```bash
 # Solution: Add to .env
-AZURE_OPENAI_API_KEY=your-key-here
+AZURE_API_KEY=your-key-here
 ```
 
 **Error: "DATABASE_URL must start with postgresql://"**
@@ -503,10 +502,9 @@ cp .env.staging .env
 4. **Keep environment configs separate**
 
 ### Cost Management
-1. **Use Supabase** for development
-2. **Right-size RDS** instances
-3. **Enable deletion protection** for production
-4. **Monitor usage** regularly
+1. **Right-size RDS** instances
+2. **Enable deletion protection** for production
+3. **Monitor usage** regularly
 
 ## Troubleshooting
 
@@ -527,7 +525,7 @@ export $(cat .env | grep -v '^#' | xargs)
 
 ```bash
 # Check secret exists
-aws secretsmanager describe-secret --secret-id cira-invoice/prod/azure-openai
+aws secretsmanager describe-secret --secret-id cira-invoice/prod/azure-ai
 
 # Check IAM permissions
 aws iam get-role-policy --role-name CiraInvoiceLambdaRole --policy-name SecretsManagerAccess

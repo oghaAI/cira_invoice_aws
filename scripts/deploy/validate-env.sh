@@ -73,10 +73,50 @@ validate_url() {
 echo "Loading environment variables..."
 
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+    # Load env file, handling inline comments properly
+    # The || [[ -n "$line" ]] handles files without trailing newline
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        # Only process valid variable assignments
+        if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            # Extract variable name
+            var_name="${line%%=*}"
+            # Extract value (everything after first =)
+            var_value="${line#*=}"
+            # Remove inline comments: strip trailing # and everything after (unless inside quotes)
+            # Handle double-quoted values
+            if [[ "$var_value" =~ ^\"([^\"]*)\" ]]; then
+                var_value="${BASH_REMATCH[1]}"
+            # Handle single-quoted values
+            elif [[ "$var_value" =~ ^\'([^\']*)\' ]]; then
+                var_value="${BASH_REMATCH[1]}"
+            # Handle unquoted values (strip after space or #)
+            else
+                var_value="${var_value%% #*}"
+                var_value="${var_value%%[[:space:]]}"
+            fi
+            export "${var_name}=${var_value}"
+        fi
+    done < .env
     print_check ".env file loaded"
 elif [ -f ".env.${ENVIRONMENT}" ]; then
-    export $(cat ".env.${ENVIRONMENT}" | grep -v '^#' | xargs)
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            var_name="${line%%=*}"
+            var_value="${line#*=}"
+            if [[ "$var_value" =~ ^\"([^\"]*)\" ]]; then
+                var_value="${BASH_REMATCH[1]}"
+            elif [[ "$var_value" =~ ^\'([^\']*)\' ]]; then
+                var_value="${BASH_REMATCH[1]}"
+            else
+                var_value="${var_value%% #*}"
+                var_value="${var_value%%[[:space:]]}"
+            fi
+            export "${var_name}=${var_value}"
+        fi
+    done < ".env.${ENVIRONMENT}"
     print_check ".env.${ENVIRONMENT} file loaded"
 else
     print_warning "No .env file found"
@@ -89,22 +129,23 @@ echo ""
 # ============================================
 echo -e "${BLUE}[1/4]${NC} Validating AWS configuration..."
 
-if [ -z "$AWS_REGION" ]; then
-    print_error "AWS_REGION is not set"
-else
+# Accept either CDK_DEFAULT_REGION or AWS_REGION
+if [ -n "$CDK_DEFAULT_REGION" ]; then
+    print_check "CDK_DEFAULT_REGION: $CDK_DEFAULT_REGION"
+    # Set AWS_REGION from CDK_DEFAULT_REGION if not already set
+    if [ -z "$AWS_REGION" ]; then
+        AWS_REGION="$CDK_DEFAULT_REGION"
+    fi
+elif [ -n "$AWS_REGION" ]; then
     print_check "AWS_REGION: $AWS_REGION"
+else
+    print_error "Neither CDK_DEFAULT_REGION nor AWS_REGION is set"
 fi
 
 if [ -z "$CDK_DEFAULT_ACCOUNT" ]; then
     print_warning "CDK_DEFAULT_ACCOUNT is not set (will be auto-detected)"
 else
     print_check "CDK_DEFAULT_ACCOUNT: $CDK_DEFAULT_ACCOUNT"
-fi
-
-if [ -z "$CDK_DEFAULT_REGION" ]; then
-    print_warning "CDK_DEFAULT_REGION is not set (will use AWS_REGION)"
-else
-    print_check "CDK_DEFAULT_REGION: $CDK_DEFAULT_REGION"
 fi
 
 echo ""
@@ -143,30 +184,79 @@ echo ""
 # ============================================
 echo -e "${BLUE}[3/4]${NC} Validating API configuration..."
 
-# Azure OpenAI
-if [ -z "$AZURE_OPENAI_API_KEY" ]; then
-    print_error "AZURE_OPENAI_API_KEY is required"
-else
+# Azure API (supports both new and legacy variable names)
+# New: AZURE_API_KEY, AZURE_API_ENDPOINT, AZURE_MODEL
+# Legacy: AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT
+if [ -n "$AZURE_API_KEY" ]; then
+    masked=$(mask_value "$AZURE_API_KEY")
+    print_check "AZURE_API_KEY is set ($masked)"
+elif [ -n "$AZURE_OPENAI_API_KEY" ]; then
     masked=$(mask_value "$AZURE_OPENAI_API_KEY")
-    print_check "AZURE_OPENAI_API_KEY is set ($masked)"
+    print_check "AZURE_OPENAI_API_KEY is set ($masked) [legacy]"
+else
+    print_error "AZURE_API_KEY (or AZURE_OPENAI_API_KEY) is required"
 fi
 
-if [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
-    print_error "AZURE_OPENAI_ENDPOINT is required"
-else
+if [ -n "$AZURE_API_ENDPOINT" ]; then
+    if validate_url "$AZURE_API_ENDPOINT"; then
+        print_check "AZURE_API_ENDPOINT: $AZURE_API_ENDPOINT"
+    else
+        print_error "AZURE_API_ENDPOINT must be a valid URL"
+    fi
+elif [ -n "$AZURE_OPENAI_ENDPOINT" ]; then
     if validate_url "$AZURE_OPENAI_ENDPOINT"; then
-        print_check "AZURE_OPENAI_ENDPOINT: $AZURE_OPENAI_ENDPOINT"
+        print_check "AZURE_OPENAI_ENDPOINT: $AZURE_OPENAI_ENDPOINT [legacy]"
     else
         print_error "AZURE_OPENAI_ENDPOINT must be a valid URL"
     fi
+else
+    print_error "AZURE_API_ENDPOINT (or AZURE_OPENAI_ENDPOINT) is required"
 fi
 
-# Mistral (Optional)
-if [ -n "$MISTRAL_API_KEY" ]; then
-    masked=$(mask_value "$MISTRAL_API_KEY")
-    print_check "MISTRAL_API_KEY is set ($masked)"
+if [ -n "$AZURE_MODEL" ]; then
+    print_check "AZURE_MODEL: $AZURE_MODEL"
+elif [ -n "$AZURE_OPENAI_DEPLOYMENT" ]; then
+    print_check "AZURE_OPENAI_DEPLOYMENT: $AZURE_OPENAI_DEPLOYMENT [legacy]"
 else
-    print_info "MISTRAL_API_KEY not set (optional)"
+    print_warning "AZURE_MODEL (or AZURE_OPENAI_DEPLOYMENT) not set"
+fi
+
+# OCR Provider Configuration
+if [ -z "$OCR_PROVIDER" ]; then
+    print_warning "OCR_PROVIDER not set (will default to 'internal')"
+    OCR_PROVIDER="internal"
+else
+    print_check "OCR_PROVIDER: $OCR_PROVIDER"
+fi
+
+if [ "$OCR_PROVIDER" = "internal" ]; then
+    if [ -z "$INTERNAL_OCR_URL" ]; then
+        print_error "INTERNAL_OCR_URL is required when OCR_PROVIDER=internal"
+    else
+        if validate_url "$INTERNAL_OCR_URL"; then
+            print_check "INTERNAL_OCR_URL: $INTERNAL_OCR_URL"
+        else
+            print_error "INTERNAL_OCR_URL must be a valid URL"
+        fi
+    fi
+elif [ "$OCR_PROVIDER" = "mistral" ]; then
+    if [ -z "$MISTRAL_API_KEY" ]; then
+        print_error "MISTRAL_API_KEY is required when OCR_PROVIDER=mistral"
+    else
+        masked=$(mask_value "$MISTRAL_API_KEY")
+        print_check "MISTRAL_API_KEY is set ($masked)"
+    fi
+    if [ -z "$MISTRAL_OCR_API_URL" ]; then
+        print_warning "MISTRAL_OCR_API_URL not set (will use default)"
+    else
+        if validate_url "$MISTRAL_OCR_API_URL"; then
+            print_check "MISTRAL_OCR_API_URL: $MISTRAL_OCR_API_URL"
+        else
+            print_error "MISTRAL_OCR_API_URL must be a valid URL"
+        fi
+    fi
+else
+    print_warning "Unknown OCR_PROVIDER: $OCR_PROVIDER"
 fi
 
 echo ""

@@ -166,7 +166,7 @@ aws sts get-caller-identity
 
 **Solutions**:
 
-#### For Supabase:
+#### For External Database:
 ```bash
 # 1. Verify connection string
 echo $DATABASE_URL
@@ -174,11 +174,11 @@ echo $DATABASE_URL
 # 2. Test connection directly
 psql $DATABASE_URL -c "SELECT 1"
 
-# 3. Check Supabase project status
-# Visit Supabase dashboard
+# 3. Check database is accessible
+# Verify firewall/network allows connection
 
-# 4. Ensure using pooler URL (port 6543)
-DATABASE_URL=postgresql://...@...pooler.supabase.co:6543/postgres
+# 4. Verify correct format
+DATABASE_URL=postgresql://user:password@host:port/database
 ```
 
 #### For RDS:

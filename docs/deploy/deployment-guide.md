@@ -6,7 +6,7 @@ This guide provides step-by-step instructions for deploying the CIRA Invoice AWS
 
 - [Prerequisites](#prerequisites)
 - [Deployment Overview](#deployment-overview)
-- [Development Deployment (Supabase)](#development-deployment-supabase)
+- [Development Deployment](#development-deployment)
 - [Staging Deployment (RDS)](#staging-deployment-rds)
 - [Production Deployment (RDS Multi-AZ)](#production-deployment-rds-multi-az)
 - [Post-Deployment Verification](#post-deployment-verification)
@@ -19,7 +19,7 @@ Before deploying, ensure you have completed all [prerequisites](prerequisites.md
 
 - ✅ AWS CLI configured
 - ✅ CDK bootstrapped
-- ✅ Azure OpenAI credentials
+- ✅ Azure AI credentials (Mistral Small)
 - ✅ Environment variables configured
 - ✅ Project dependencies installed
 
@@ -28,7 +28,7 @@ Before deploying, ensure you have completed all [prerequisites](prerequisites.md
 The deployment process consists of these main steps:
 
 1. **Validation**: Check AWS setup and environment variables
-2. **Database Deployment**: Deploy RDS (or configure Supabase for dev)
+2. **Database Deployment**: Deploy RDS or configure external database
 3. **Application Deployment**: Deploy API, Workflow, and Monitoring stacks
 4. **Verification**: Run health checks and endpoint tests
 
@@ -40,7 +40,7 @@ The deployment process consists of these main steps:
 └──────────┬───────────┘
            │
 ┌──────────▼───────────┐
-│  Deploy Database     │  ← RDS or Supabase
+│  Deploy Database     │  ← RDS or External DB
 └──────────┬───────────┘
            │
 ┌──────────▼───────────┐
@@ -52,9 +52,9 @@ The deployment process consists of these main steps:
 └──────────────────────┘
 ```
 
-## Development Deployment (Supabase)
+## Development Deployment
 
-Development environment uses Supabase for the database to minimize costs and setup time.
+Development environment setup for local testing and development.
 
 ### Step 1: Configure Environment
 
@@ -69,22 +69,20 @@ nano .env
 Required variables:
 ```bash
 USE_EXTERNAL_DATABASE=true
-DATABASE_URL=postgresql://postgres.[project]:password@...supabase.co:6543/postgres
-AZURE_OPENAI_API_KEY=your-key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+DATABASE_URL=postgresql://user:password@host:port/database
+AZURE_API_KEY=your-key
+AZURE_API_ENDPOINT=https://your-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 AWS_REGION=us-east-1
 ```
 
-### Step 2: Initialize Supabase Database
+### Step 2: Initialize Database
 
-```sql
--- Run this SQL in Supabase SQL Editor
--- Copy from: packages/database/schema.sql
+Ensure your PostgreSQL database is initialized with the schema:
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-CREATE TYPE job_status AS ENUM ('queued', 'processing', 'completed', 'failed');
--- ... (rest of schema)
+```bash
+# Apply database migrations
+cd packages/database && npm run db:migrate
 ```
 
 ### Step 3: Validate Setup
@@ -104,7 +102,7 @@ CREATE TYPE job_status AS ENUM ('queued', 'processing', 'completed', 'failed');
 
 # This will:
 # 1. Validate AWS setup
-# 2. Skip database deployment (using Supabase)
+# 2. Skip RDS deployment (using external database)
 # 3. Deploy API, Workflow, and Monitoring stacks
 # 4. Run health checks
 ```
@@ -122,7 +120,7 @@ Region: us-east-1
 ✓ Validation passed
 
 [2/5] Deploying Database Stack
-⚠ Using external database (Supabase)
+⚠ Using external database
 Skipping RDS deployment
 
 [3/5] Deploying Application Stacks
@@ -188,8 +186,9 @@ nano .env
 Required variables:
 ```bash
 USE_EXTERNAL_DATABASE=false  # Will use RDS
-AZURE_OPENAI_API_KEY=your-key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+AZURE_API_KEY=your-key
+AZURE_API_ENDPOINT=https://your-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 AWS_REGION=us-east-1
 
 # RDS Configuration
@@ -307,15 +306,16 @@ ENABLE_ENHANCED_MONITORING=true
 ### Step 2: Store Secrets in Secrets Manager
 
 ```bash
-# Store Azure OpenAI credentials
+# Store Azure AI credentials (Mistral Small)
 aws secretsmanager create-secret \
-  --name cira-invoice/prod/azure-openai \
+  --name cira-invoice/prod/azure-ai \
   --secret-string '{
     "api_key":"your-azure-key",
-    "endpoint":"your-azure-endpoint"
+    "endpoint":"https://your-resource.services.ai.azure.com/models",
+    "model":"mistral-small-2503"
   }'
 
-# Store Mistral API key
+# Store Mistral API key (for OCR)
 aws secretsmanager create-secret \
   --name cira-invoice/prod/mistral-api-key \
   --secret-string "your-mistral-key"
@@ -563,7 +563,7 @@ aws rds describe-db-instances
 
 ## Cost Optimization
 
-- **Development**: Use Supabase (free tier)
+- **Development**: Use external database to minimize AWS costs
 - **Staging**: Use smallest RDS instance (db.t3.micro/small)
 - **Production**: Right-size based on actual load
 - **Off-hours**: Consider stopping dev/staging RDS instances

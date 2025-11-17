@@ -10,14 +10,9 @@ Before deploying the CIRA Invoice AWS system, ensure you have all the required t
 - **Billing alerts** configured (recommended)
 
 ### Azure Account
-- **Azure OpenAI** service provisioned
+- **Azure AI** service provisioned
 - **API key** and **endpoint URL** available
-- **GPT-4** or **GPT-4 Turbo** deployment created
-
-### Supabase (Development Only)
-- **Supabase project** created (for development environment)
-- **PostgreSQL connection string** available
-- **Database** initialized with schema
+- **Mistral Small** deployment created
 
 ## Required Tools
 
@@ -185,20 +180,20 @@ aws service-quotas get-service-quota \
 - VPC: 5 VPCs per region
 - API Gateway: 10 API keys
 
-## Azure OpenAI Setup
+## Azure AI Setup
 
-### 1. Create Azure OpenAI Resource
+### 1. Create Azure AI Resource
 
 1. Log in to [Azure Portal](https://portal.azure.com)
-2. Create a new **Azure OpenAI** resource
+2. Create a new **Azure AI** resource (AI Services)
 3. Choose your preferred region
 4. Note the **resource name** and **endpoint URL**
 
 ### 2. Deploy a Model
 
-1. Navigate to your Azure OpenAI resource
+1. Navigate to your Azure AI resource
 2. Go to **Model deployments**
-3. Deploy **GPT-4** or **GPT-4 Turbo**
+3. Deploy **Mistral Small** (e.g., `mistral-small-2503`)
 4. Note the **deployment name**
 
 ### 3. Get API Credentials
@@ -208,38 +203,9 @@ aws service-quotas get-service-quota \
 # Go to: Keys and Endpoint
 
 # You'll need:
-AZURE_OPENAI_API_KEY=your-key-here
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-```
-
-## Supabase Setup (Development Only)
-
-### 1. Create Project
-
-1. Visit [Supabase](https://supabase.com)
-2. Create a new project
-3. Choose your preferred region
-4. Wait for database to initialize (~2 minutes)
-
-### 2. Get Connection String
-
-```bash
-# Navigate to: Project Settings > Database
-# Copy the connection string under "Connection string"
-
-# Format:
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-ID].supabase.co:5432/postgres
-
-# Or use the connection pooling URL (recommended):
-DATABASE_URL=postgresql://postgres.[PROJECT-ID]:[PASSWORD]@aws-0-[REGION].pooler.supabase.co:6543/postgres
-```
-
-### 3. Initialize Schema
-
-```bash
-# Run the schema SQL
-# Copy contents from: packages/database/schema.sql
-# Paste into Supabase SQL Editor and execute
+AZURE_API_KEY=your-key-here
+AZURE_API_ENDPOINT=https://your-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 ```
 
 ## Project Setup
@@ -289,15 +255,16 @@ AWS_REGION=us-east-1
 CDK_DEFAULT_ACCOUNT=your-account-id
 CDK_DEFAULT_REGION=us-east-1
 
-# Database (Dev)
+# Database
 USE_EXTERNAL_DATABASE=true
 DATABASE_URL=postgresql://...
 
-# Azure OpenAI
-AZURE_OPENAI_API_KEY=your-key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+# Azure AI (Mistral Small)
+AZURE_API_KEY=your-key
+AZURE_API_ENDPOINT=https://your-resource.services.ai.azure.com/models
+AZURE_MODEL=mistral-small-2503
 
-# Optional
+# Optional (for Mistral OCR provider)
 MISTRAL_API_KEY=your-mistral-key
 ```
 
@@ -311,10 +278,9 @@ Before proceeding with deployment, verify:
 - [ ] Node.js >= 20.17.0 installed
 - [ ] npm >= 10.0.0 installed
 - [ ] jq installed (for scripts)
-- [ ] Azure OpenAI resource created
-- [ ] Azure OpenAI API key obtained
-- [ ] GPT-4 model deployed in Azure
-- [ ] Supabase project created (for dev)
+- [ ] Azure AI resource created
+- [ ] Azure AI API key obtained
+- [ ] Mistral Small model deployed in Azure
 - [ ] Database connection string obtained
 - [ ] Project dependencies installed
 - [ ] Project builds successfully
@@ -393,8 +359,8 @@ Once all prerequisites are met:
 
 - **AWS Documentation**: https://docs.aws.amazon.com/
 - **CDK Documentation**: https://docs.aws.amazon.com/cdk/
-- **Azure OpenAI**: https://azure.microsoft.com/en-us/products/ai-services/openai-service
-- **Supabase**: https://supabase.com/docs
+- **Azure AI**: https://azure.microsoft.com/en-us/products/ai-services
+- **Mistral AI**: https://docs.mistral.ai/
 - **Node.js**: https://nodejs.org/docs/
 
 ## Cost Considerations
@@ -402,8 +368,5 @@ Once all prerequisites are met:
 Be aware of potential costs:
 
 - **AWS Free Tier**: 1M Lambda requests/month (first 12 months)
-- **Azure OpenAI**: Pay-per-token pricing
-- **Supabase**: Free tier available (2 projects, 500MB database)
+- **Azure AI (Mistral)**: Pay-per-token pricing
 - **RDS**: No free tier ($25-$350+/month depending on instance)
-
-**Recommendation**: Start with development environment (Supabase) to minimize costs while testing.

@@ -153,26 +153,45 @@ echo -e "${BLUE}[6/8]${NC} Checking required environment variables..."
 # Load .env file if it exists
 if [ -f .env ]; then
     print_check ".env file found"
-    export $(cat .env | grep -v '^#' | xargs)
+    # Load env file, handling inline comments properly
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            var_name="${line%%=*}"
+            var_value="${line#*=}"
+            if [[ "$var_value" =~ ^\"([^\"]*)\" ]]; then
+                var_value="${BASH_REMATCH[1]}"
+            elif [[ "$var_value" =~ ^\'([^\']*)\' ]]; then
+                var_value="${BASH_REMATCH[1]}"
+            else
+                var_value="${var_value%% #*}"
+                var_value="${var_value%%[[:space:]]}"
+            fi
+            export "${var_name}=${var_value}"
+        fi
+    done < .env
 else
     print_warning ".env file not found (will use environment variables)"
 fi
 
-# Check critical variables
-REQUIRED_VARS=(
-    "AZURE_OPENAI_API_KEY"
-    "AZURE_OPENAI_ENDPOINT"
-)
+# Check Azure API credentials (supports both new and legacy variable names)
+if [ -n "$AZURE_API_KEY" ]; then
+    masked_value="${AZURE_API_KEY:0:4}...${AZURE_API_KEY: -4}"
+    print_check "AZURE_API_KEY is set ($masked_value)"
+elif [ -n "$AZURE_OPENAI_API_KEY" ]; then
+    masked_value="${AZURE_OPENAI_API_KEY:0:4}...${AZURE_OPENAI_API_KEY: -4}"
+    print_check "AZURE_OPENAI_API_KEY is set ($masked_value) [legacy]"
+else
+    print_error "AZURE_API_KEY (or AZURE_OPENAI_API_KEY) is not set"
+fi
 
-for var in "${REQUIRED_VARS[@]}"; do
-    if [ -z "${!var}" ]; then
-        print_error "$var is not set"
-    else
-        # Mask the value for security
-        masked_value="${!var:0:4}...${!var: -4}"
-        print_check "$var is set ($masked_value)"
-    fi
-done
+if [ -n "$AZURE_API_ENDPOINT" ]; then
+    print_check "AZURE_API_ENDPOINT is set"
+elif [ -n "$AZURE_OPENAI_ENDPOINT" ]; then
+    print_check "AZURE_OPENAI_ENDPOINT is set [legacy]"
+else
+    print_error "AZURE_API_ENDPOINT (or AZURE_OPENAI_ENDPOINT) is not set"
+fi
 
 # Check database configuration
 if [ -z "$USE_EXTERNAL_DATABASE" ]; then
@@ -196,7 +215,7 @@ echo ""
 # ============================================
 echo -e "${BLUE}[7/8]${NC} Checking project build..."
 
-if [ -d "packages/infrastructure/lib" ]; then
+if [ -d "packages/infrastructure/dist" ]; then
     print_check "Infrastructure package appears to be built"
 else
     print_warning "Infrastructure package may not be built"
