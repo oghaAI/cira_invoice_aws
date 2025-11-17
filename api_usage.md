@@ -4,7 +4,38 @@
 
 The CIRA Invoice Processing API provides a serverless, AI-powered solution for extracting structured data from PDF invoices. The system processes invoices through a 3-stage workflow: OCR → LLM Extraction → Storage.
 
-## Base URL
+## Environments
+
+The API is available in three environments, each with different configurations and purposes:
+
+### Development
+- **Purpose**: Development and testing
+- **Database**: Supabase (external)
+- **Base URL**: `https://[your-api-id].execute-api.us-east-1.amazonaws.com/dev`
+- **Rate Limit**: 100 requests/minute
+- **Use Case**: Local development, feature testing
+
+### Staging
+- **Purpose**: Pre-production testing
+- **Database**: AWS RDS PostgreSQL (db.t3.small)
+- **Base URL**: `https://[your-api-id].execute-api.us-east-1.amazonaws.com/staging`
+- **Rate Limit**: 500 requests/minute
+- **Use Case**: Integration testing, QA validation
+
+### Production
+- **Purpose**: Production workloads
+- **Database**: AWS RDS PostgreSQL Multi-AZ (db.r5.large)
+- **Base URL**: `https://[your-api-id].execute-api.us-east-1.amazonaws.com/prod`
+- **Rate Limit**: 1000 requests/minute
+- **Use Case**: Live traffic, customer-facing applications
+
+**Note**: After deployment, get your actual endpoint URL from:
+```bash
+source deployment-{environment}.config
+echo $API_ENDPOINT
+```
+
+## Base URL (Development Example)
 
 ```
 https://nldl5jl1x6.execute-api.us-east-1.amazonaws.com/dev
@@ -14,10 +45,51 @@ https://nldl5jl1x6.execute-api.us-east-1.amazonaws.com/dev
 
 All endpoints (except health check) require API key authentication via the `X-API-Key` header.
 
-**Default API Key:**
+### Getting Your API Key
+
+After deployment, retrieve your API key:
+
+```bash
+# Load deployment configuration
+source deployment-{environment}.config
+
+# View API key
+echo $API_KEY
+
+# Or get from AWS
+aws apigateway get-api-keys --include-values \
+  --query "items[?name=='CiraInvoice-{environment}'].value" \
+  --output text
+```
+
+**Development API Key (Example):**
 ```
 Mwaf64Bevy7Jl7ynOtsCK2St9GHpqHbya3Ct2HVs
 ```
+
+### Generating New API Keys
+
+For production, you should generate new API keys:
+
+```bash
+# Create new API key
+aws apigateway create-api-key \
+  --name "CiraInvoice-prod-$(date +%Y%m%d)" \
+  --enabled
+
+# Associate with usage plan
+aws apigateway create-usage-plan-key \
+  --usage-plan-id YOUR_USAGE_PLAN_ID \
+  --key-id YOUR_NEW_KEY_ID \
+  --key-type API_KEY
+```
+
+**Security Best Practices**:
+- Rotate API keys regularly (quarterly for production)
+- Use different keys for each environment
+- Store keys in secrets manager for production
+- Never commit API keys to version control
+- Implement key rotation without downtime
 
 ## Quick Start
 
@@ -450,11 +522,38 @@ Each field includes a `reason_code` explaining how it was extracted:
 - **`conflict`**: Multiple conflicting values found
 - **`missing`**: Field not found in the document
 
+## Deployment
+
+For information on deploying and managing the API infrastructure, see:
+
+- **[Deployment Guide](docs/deploy/deployment-guide.md)** - Step-by-step deployment instructions
+- **[Prerequisites](docs/deploy/prerequisites.md)** - Required tools and setup
+- **[Environment Setup](docs/deploy/environment-setup.md)** - Configure environment variables
+- **[Monitoring](docs/deploy/monitoring.md)** - CloudWatch dashboards and alarms
+- **[Troubleshooting](docs/deploy/troubleshooting.md)** - Common issues and solutions
+
+### Quick Deployment
+
+```bash
+# Deploy to development
+./scripts/deploy/deploy.sh dev
+
+# Deploy to staging
+./scripts/deploy/deploy.sh staging
+
+# Deploy to production
+./scripts/deploy/deploy.sh prod
+
+# Verify deployment
+./scripts/deploy/verify-deployment.sh {environment}
+```
+
 ## Support
 
 For issues or questions:
 - Check CloudWatch logs for detailed error information
-- Review the API specification: `docs/api-spec.yaml`
+- Review deployment documentation in `docs/deploy/`
+- Run health checks: `./scripts/deploy/health-check.sh {environment}`
 - Check job status and error messages via the API
 
 ## Version
