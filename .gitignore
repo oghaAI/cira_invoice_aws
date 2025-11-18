@@ -46,7 +46,6 @@ tsconfig.tsbuildinfo
 
 # Env files (keep examples)
 .env
-.env.*
 !.env.example
 !.env.sample
 
